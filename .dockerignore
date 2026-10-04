@@ -1,0 +1,10 @@
+.venv
+.uv-cache
+.mediachain
+.git
+__pycache__
+.pytest_cache
+.env
+frontend/node_modules
+frontend/dist
+frontend/test-results

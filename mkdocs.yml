@@ -1,0 +1,56 @@
+site_name: MediaChain
+site_description: Composable, temporally grounded multimodal AI pipelines
+site_url: https://imnehal360.github.io/Mediachain/
+repo_url: https://github.com/imnehal360/Mediachain
+repo_name: imnehal360/Mediachain
+edit_uri: edit/main/docs/
+
+theme:
+  name: material
+  features:
+    - navigation.instant
+    - navigation.sections
+    - navigation.top
+    - search.highlight
+    - content.code.copy
+
+plugins:
+  - search
+  - mkdocstrings:
+      handlers:
+        python:
+          paths: [src]
+          options:
+            docstring_style: google
+            members_order: source
+            show_source: true
+            show_root_heading: true
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - pymdownx.details
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.superfences
+  - toc:
+      permalink: true
+
+nav:
+  - Home: index.md
+  - Getting started: getting-started.md
+  - Guides:
+      - Architecture: ARCHITECTURE.md
+      - Retrieval and grounding: retrieval-and-grounding.md
+      - Extensions and plugins: EXTENDING.md
+  - API reference: api-reference.md
+  - Operations:
+      - Deployment: DEPLOYMENT.md
+      - Validation: VALIDATION.md
+  - Project:
+      - Engineering decisions: DECISIONS.md
+      - Implementation plan: IMPLEMENTATION_PLAN.md
+      - Release checklist: release-checklist.md
+
+watch:
+  - src/mediachain
