@@ -107,8 +107,9 @@ the API and worker, checks persisted retrieval again, and deletes the asset. It 
 `127.0.0.1:18000`; disposable service ports remain internal. Do not use its fixed test credentials
 or unencrypted service network as a production configuration.
 
-CI has a real-service integration job plus this Compose smoke job. Live model-provider quality must
-still be validated with deployment-specific credentials; see VALIDATION.md for actual local results.
+CI passes a real-service integration job plus this Compose smoke job on Ubuntu 24.04. Live
+model-provider quality must still be validated with deployment-specific credentials; see
+VALIDATION.md for the precise verification boundary.
 
 Provider documentation consulted during implementation:
 [Qdrant async API](https://qdrant.tech/documentation/tutorials-develop/async-api/),

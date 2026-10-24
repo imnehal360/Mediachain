@@ -27,19 +27,20 @@ Updated after each phase. Live credentials and external services are never assum
 
 ## Phase completion reports
 
-Implementation exists across all eight phases. Validation requiring unavailable providers or services
-is explicitly pending; this is an initial release, not an assertion of full production qualification.
+Implementation exists across all eight phases. Validation requiring live model providers or a
+long-lived hosted staging environment is explicitly pending; this is an initial release, not an
+assertion of full production qualification.
 
 | Phase | Implemented components and primary files | Executed verification | Limitations and next step |
 |---|---|---|---|
-| 1 — Foundation | `pyproject.toml`, `uv.lock`, `core/models.py`, `core/interfaces.py`, `core/config.py`, `core/errors.py`; architecture and decision records | Seven model/configuration tests; import guard; full-package mypy and Ruff checks pass | CI for other Python/OS combinations remains to run |
+| 1 — Foundation | `pyproject.toml`, `uv.lock`, `core/models.py`, `core/interfaces.py`, `core/config.py`, `core/errors.py`; architecture and decision records | Seven model/configuration tests; import guard; full-package mypy and Ruff checks pass; Linux CI passes on Python 3.11–3.13 | Non-Linux platforms remain locally tested only on macOS Python 3.11 |
 | 2 — Unified processing | `loaders/local.py`, `loaders/http.py`, `processors/{text,audio,video,ocr}.py`, `modalities/audio/ffmpeg.py`, `modalities/video/sampling.py` | Processing unit tests; real FFmpeg/PyAV media tests for offsets, sampling and scenes; deterministic OCR and diarization tests; text/audio/video end-to-end tests | Recognition and OCR quality require configured hosted providers |
-| 3 — Models/storage | `models/providers.py`, `embeddings/local.py`, `storage/{local,vector,postgres,qdrant,cache}.py` | Three storage unit tests; embedded Qdrant test; real Redis test; provider modules import and type-check | PostgreSQL service integration and live inference remain unexecuted |
+| 3 — Models/storage | `models/providers.py`, `embeddings/local.py`, `storage/{local,vector,postgres,qdrant,cache}.py` | Three storage unit tests; embedded and remote Qdrant tests; real PostgreSQL and Redis tests; provider modules import and type-check | Live model inference remains unexecuted |
 | 4 — Temporal/retrieval | `temporal/alignment.py`, `retrieval/hybrid.py` | Temporal, retrieval filtering/fusion and multimodal end-to-end tests pass | Python-side candidate filtering targets bounded corpora; add backend-native search for scale |
 | 5 — RAG/workflows | `rag/engine.py`, `chains/runnable.py`, `workflows/dag.py` | Grounding/context and optional answer-verification tests; workflow tests cover pipes, branching, DAGs, retries, timeout and cancellation | Model verification reduces unsupported answers but is not a formal entailment proof |
 | 6 — Agents/extensibility | `agents/{runtime,tools}.py`, `plugins/registry.py`, `observability/tracing.py`, cache integration in `runtime/client.py` | Three agent/plugin/cache tests and six safety/lifecycle tests pass | Usage limits depend on provider-reported tokens; derived tool frame retention belongs to caller |
-| 7 — API/deployment | `api/app.py`, `runtime/{jobs,server}.py`, `Dockerfile`, `docker-compose.yml`, `docker-compose.test.yml`, `.env.example` | API tests pass; real-service and full-stack Compose CI jobs cover persistence, restart, recovery and deletion; server adapters import and type-check | Docker and PostgreSQL were unavailable locally; the new jobs require their first remote CI run before qualification |
-| 8 — Validation/reference apps | `tests/`, `examples/`, `benchmarks/retrieval.py`, `.github/workflows/ci.yml`, README and operational docs | Current source suite: 50 passed, 3 service tests skipped; frontend: 9 Playwright checks passed, 1 skipped; Redis test separately passed; wheel/sdist built; measured lexical baseline recorded | Run reference video QA with configured real inference providers; run remote CI and infrastructure tests |
+| 7 — API/deployment | `api/app.py`, `runtime/{jobs,server}.py`, `Dockerfile`, `docker-compose.yml`, `docker-compose.test.yml`, `.env.example` | API tests pass; real-service and full-stack Compose CI jobs pass and cover persistence, restart, recovery and deletion; server adapters import and type-check | Qualify a long-lived hosted staging deployment and its backup/restore procedures |
+| 8 — Validation/reference apps | `tests/`, `examples/`, `benchmarks/retrieval.py`, `.github/workflows/ci.yml`, README and operational docs | Current local source suite: 50 passed, 3 service tests skipped; frontend: 9 Playwright checks passed, 1 skipped; Linux CI passes all service and Compose jobs; wheel/sdist built; measured lexical baseline recorded | Run reference video QA with configured real inference providers |
 
 The first dependency download was slow, so foundation/unit checks initially used complete downloaded
 archives. Full installed-environment checks superseded those preliminary results. Bugs fixed during
