@@ -244,3 +244,7 @@ class Job(Model):
     status: str = "queued"
     error: str | None = None
     created_at: float = Field(default_factory=time.time)
+    updated_at: float = Field(default_factory=time.time)
+    started_at: float | None = None
+    finished_at: float | None = None
+    attempts: int = Field(default=0, ge=0)

@@ -8,6 +8,11 @@ Version 0.1.0 is an alpha developer preview. Public APIs may change before 1.0. 
 [validation](docs/VALIDATION.md) for what has actually been tested and
 [deployment limitations](docs/DEPLOYMENT.md) before operating a multi-user service.
 
+The authenticated API includes a responsive black-and-red web workspace for uploads, processing,
+grounded Q&A, summaries, citations, and timestamped audio/video evidence. Production Compose runs
+only the application and worker; PostgreSQL, Redis, Qdrant, object storage, and model endpoints are
+configured as hosted services through environment variables.
+
 ## Install
 
 Once the first public release is available on PyPI:
@@ -95,6 +100,16 @@ Video processing reuses AudioProcessor, decodes frames with PyAV, and processes 
 concurrently. Interval and scene sampling are replaceable. Transcript and visual evidence retain
 original-media timestamps, including audio stream offsets. Visual observation windows describe
 sampled frames; they do not assert that a screen remained unchanged between frames.
+
+Hosted OpenAI-compatible adapters are available for transcription, diarization, embeddings, chat,
+and vision. Scanned PDFs can render bounded pages for OCR through a configured vision endpoint.
+Generated answers can optionally receive a second evidence-verification pass before being returned.
+
+Hugging Face Inference Providers are supported natively for timestamped speech recognition and
+feature-extraction embeddings, and through Hugging Face's chat-completions router for chat, vision,
+and OCR. Set `SPEECH_PROVIDER=huggingface` and `EMBEDDING_PROVIDER=huggingface`; see `.env.example`
+for the complete hosted configuration. Provider availability and free inference credits are limited,
+so deployments should surface failed jobs and monitor usage rather than assuming unlimited inference.
 
 ## Load remote media deliberately
 

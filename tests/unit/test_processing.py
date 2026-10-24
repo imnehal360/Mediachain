@@ -39,6 +39,47 @@ async def test_audio_provenance(tmp_path):
     assert docs[0].asset_id == asset.id
 
 
+async def test_audio_assigns_overlapping_hosted_speaker(tmp_path):
+    class Speech:
+        model_id, model_version = "speech", "1"
+
+        async def transcribe(self, audio_path: Path):
+            return [SpeechSegment(text="Hello", start_time=2, end_time=5)]
+
+    class Diarization:
+        model_id, model_version = "diarization", "1"
+
+        async def diarize(self, audio_path: Path):
+            return [SpeechSegment(text="", speaker="speaker-1", start_time=1, end_time=6)]
+
+    path = tmp_path / "a.wav"
+    path.write_bytes(b"fixture")
+    asset = await LocalLoader().load(str(path))
+    docs = await AudioProcessor(Speech(), Diarization()).transcribe(asset, path, ExecutionContext())
+    assert docs[0].metadata["speaker"] == "speaker-1"
+    assert docs[0].provenance[-1].operation == "diarize"
+
+
+async def test_scanned_pdf_uses_configured_ocr(tmp_path):
+    PdfWriter = pytest.importorskip("pypdf").PdfWriter
+    path = tmp_path / "scan.pdf"
+    writer = PdfWriter()
+    writer.add_blank_page(width=100, height=100)
+    writer.write(path)
+
+    class OCR:
+        model_id, model_version = "hosted-ocr", "1"
+
+        async def extract(self, document_path: Path):
+            return ["Scanned invoice total is 42 dollars"]
+
+    asset = await LocalLoader().load(str(path))
+    result = await TextProcessor(ocr=OCR()).process(asset, ExecutionContext())
+    assert result.documents[0].content == "Scanned invoice total is 42 dollars"
+    assert result.documents[0].metadata["page"] == 1
+    assert result.documents[0].metadata["processing"]["ocr"] == ["hosted-ocr", "1"]
+
+
 async def test_loader_limits_and_owner_identity(tmp_path):
     path = tmp_path / "a.txt"
     path.write_text("abc")

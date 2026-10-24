@@ -1,0 +1,85 @@
+name: mediachain-test
+
+x-app: &app
+  build: .
+  environment: &app-environment
+    DATABASE_URL: postgresql://mediachain:mediachain@postgres:5432/mediachain
+    REDIS_URL: redis://redis:6379/0
+    QDRANT_URL: http://qdrant:6333
+    S3_BUCKET: mediachain-test
+    S3_PREFIX: smoke
+    S3_ENDPOINT_URL: http://seaweedfs:8333
+    AWS_REGION: us-east-1
+    AWS_ACCESS_KEY_ID: mediachain
+    AWS_SECRET_ACCESS_KEY: mediachain-secret
+    MEDIACHAIN_API_KEYS: '{"ci-test-key":"ci-owner"}'
+    MEDIACHAIN_REQUIRE_HOSTED_SERVICES: "true"
+    MEDIACHAIN_DATA_DIR: /data
+    MEDIACHAIN_FRONTEND_DIR: /app/frontend/dist
+  depends_on:
+    postgres:
+      condition: service_healthy
+    redis:
+      condition: service_healthy
+    qdrant:
+      condition: service_started
+    seaweedfs:
+      condition: service_started
+  volumes:
+    - media-cache:/data
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: mediachain
+      POSTGRES_USER: mediachain
+      POSTGRES_PASSWORD: mediachain
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U mediachain -d mediachain"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+    volumes:
+      - redis-data:/data
+
+  qdrant:
+    image: qdrant/qdrant:v1.19.0
+    volumes:
+      - qdrant-data:/qdrant/storage
+
+  seaweedfs:
+    image: chrislusf/seaweedfs:4.47
+    environment:
+      AWS_ACCESS_KEY_ID: mediachain
+      AWS_SECRET_ACCESS_KEY: mediachain-secret
+      S3_BUCKET: mediachain-test
+    volumes:
+      - seaweedfs-data:/data
+
+  api:
+    <<: *app
+    ports:
+      - "127.0.0.1:18000:8000"
+
+  worker:
+    <<: *app
+    command: ["arq", "mediachain.runtime.server.WorkerSettings"]
+
+volumes:
+  media-cache:
+  postgres-data:
+  redis-data:
+  qdrant-data:
+  seaweedfs-data:

@@ -2,20 +2,17 @@ x-app: &app
   build: .
   env_file: .env
   environment:
-    DATABASE_URL: postgresql://mediachain:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@postgres/mediachain
-    REDIS_URL: redis://redis:6379/0
-    QDRANT_URL: http://qdrant:6333
+    DATABASE_URL: ${DATABASE_URL:?Set hosted DATABASE_URL in .env}
+    REDIS_URL: ${REDIS_URL:?Set hosted REDIS_URL in .env}
+    QDRANT_URL: ${QDRANT_URL:?Set hosted QDRANT_URL in .env}
+    S3_BUCKET: ${S3_BUCKET:?Set hosted S3_BUCKET in .env}
+    MEDIACHAIN_API_KEYS: ${MEDIACHAIN_API_KEYS:?Set MEDIACHAIN_API_KEYS in .env}
+    MEDIACHAIN_REQUIRE_HOSTED_SERVICES: "true"
     MEDIACHAIN_DATA_DIR: /data
+    MEDIACHAIN_FRONTEND_DIR: /app/frontend/dist
   volumes:
     - media:/data
     - models:/home/mediachain/.cache
-  depends_on:
-    postgres:
-      condition: service_healthy
-    redis:
-      condition: service_healthy
-    qdrant:
-      condition: service_started
 
 services:
   api:
@@ -25,37 +22,7 @@ services:
   worker:
     <<: *app
     command: ["arq", "mediachain.runtime.server.WorkerSettings"]
-  postgres:
-    image: postgres:16-alpine
-    environment:
-      POSTGRES_DB: mediachain
-      POSTGRES_USER: mediachain
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
-    volumes:
-      - postgres:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U mediachain"]
-      interval: 5s
-      timeout: 5s
-      retries: 10
-  redis:
-    image: redis:7-alpine
-    command: ["redis-server", "--appendonly", "yes"]
-    volumes:
-      - redis:/data
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 5s
-      timeout: 5s
-      retries: 10
-  qdrant:
-    image: qdrant/qdrant:v1.19.1
-    volumes:
-      - qdrant:/qdrant/storage
 
 volumes:
   media:
   models:
-  postgres:
-  redis:
-  qdrant:

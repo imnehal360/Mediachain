@@ -4,6 +4,7 @@ from mediachain.core.models import EmbeddingSpace, VectorRecord
 from mediachain.storage.qdrant import QdrantVectorStore
 
 
+@pytest.mark.filterwarnings("ignore:Payload indexes have no effect in the local Qdrant")
 async def test_qdrant_embedded_namespace_filter_delete():
     qdrant = pytest.importorskip("qdrant_client")
     client = qdrant.AsyncQdrantClient(location=":memory:")

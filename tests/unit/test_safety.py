@@ -1,3 +1,4 @@
+import asyncio
 import socket
 import sys
 
@@ -8,6 +9,8 @@ from mediachain.core.config import ProcessingConfig
 from mediachain.core.errors import UnsupportedMediaError
 from mediachain.core.models import Document, ProcessingResult, RetrievalFilter
 from mediachain.loaders.http import HTTPSLoader
+from mediachain.runtime.jobs import asset_lease
+from mediachain.runtime.server import validate_server_config
 from mediachain.storage.vector import MemoryVectorStore
 
 
@@ -96,8 +99,61 @@ async def test_sync_wrappers_reject_running_event_loop(tmp_path):
 def test_core_import_does_not_import_optional_provider_libraries():
     import subprocess
 
-    script = "import mediachain,sys; assert not ({'fastapi','av','faster_whisper','qdrant_client','redis','asyncpg','sentence_transformers'} & set(sys.modules))"
+    script = "import mediachain,sys; assert not ({'fastapi','av','faster_whisper','qdrant_client','redis','asyncpg','sentence_transformers','huggingface_hub'} & set(sys.modules))"
     subprocess.run([sys.executable, "-c", script], check=True)
+
+
+def test_hosted_server_configuration_is_explicit(monkeypatch):
+    monkeypatch.setenv("MEDIACHAIN_REQUIRE_HOSTED_SERVICES", "true")
+    for name in ("DATABASE_URL", "REDIS_URL", "QDRANT_URL", "S3_BUCKET"):
+        monkeypatch.delenv(name, raising=False)
+    with pytest.raises(ValueError, match="DATABASE_URL.*REDIS_URL.*QDRANT_URL.*S3_BUCKET"):
+        validate_server_config()
+
+    monkeypatch.setenv("DATABASE_URL", "postgresql://host/database")
+    monkeypatch.setenv("REDIS_URL", "rediss://host/0")
+    monkeypatch.setenv("QDRANT_URL", "https://qdrant.example")
+    monkeypatch.setenv("S3_BUCKET", "bucket")
+    monkeypatch.setenv("MEDIACHAIN_API_KEYS", '{"key":"owner"}')
+    validate_server_config()
+    monkeypatch.setenv("SPEECH_MODEL", "openai/whisper-large-v3")
+    monkeypatch.setenv("SPEECH_PROVIDER", "huggingface")
+    monkeypatch.setenv("EMBEDDING_MODEL", "sentence-transformers/all-MiniLM-L6-v2")
+    monkeypatch.setenv("EMBEDDING_PROVIDER", "huggingface")
+    validate_server_config()
+    monkeypatch.setenv("DIARIZATION_MODEL", "speaker-model")
+    with pytest.raises(ValueError, match="DIARIZATION_BASE_URL"):
+        validate_server_config()
+
+
+async def test_asset_lease_renews_until_released():
+    class Lock:
+        renewed = 0
+        released = False
+
+        async def acquire(self):
+            return True
+
+        async def extend(self, seconds, *, replace_ttl):
+            assert seconds == 1
+            assert replace_ttl
+            self.renewed += 1
+
+        async def release(self):
+            self.released = True
+
+    lock = Lock()
+
+    class Redis:
+        def lock(self, name, **options):
+            assert name == "mediachain:lease:asset"
+            assert options["timeout"] == 1
+            return lock
+
+    async with asset_lease(Redis(), "asset", lease_seconds=1, renew_every=0.001):
+        await asyncio.sleep(0.005)
+    assert lock.renewed > 0
+    assert lock.released
 
 
 async def test_cache_invalidation_after_config_change(tmp_path):

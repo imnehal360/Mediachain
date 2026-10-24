@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import asyncio
+import time
 from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from typing import Any, Protocol
 from uuid import uuid4
 
@@ -33,7 +34,11 @@ class LocalJobQueue:
         return job
 
     async def _run(self, job: Job) -> None:
+        now = time.time()
         job.status = "running"
+        job.started_at = job.started_at or now
+        job.updated_at = now
+        job.attempts += 1
         await self.chain.metadata.put_job(job)
         try:
             await self.chain.process(job.media_id, ExecutionContext(owner_id=job.owner_id))
@@ -47,6 +52,9 @@ class LocalJobQueue:
                 "Processing failed; inspect configured providers and server traces",
             )
         finally:
+            job.updated_at = time.time()
+            if job.status in {"completed", "failed", "cancelled"}:
+                job.finished_at = job.updated_at
             if await self.chain.metadata.get_asset(job.media_id):
                 await self.chain.metadata.put_job(job)
 
@@ -75,11 +83,50 @@ class ARQJobQueue:
         await self.redis.aclose()
 
 
+async def reconcile_stale_jobs(chain: MediaChain, stale_after: float = 3900) -> int:
+    """Mark jobs abandoned beyond the worker timeout as failed after a restart."""
+    cutoff = time.time() - stale_after
+    jobs = await chain.metadata.list_stale_jobs(cutoff)
+    now = time.time()
+    for job in jobs:
+        job.status = "failed"
+        job.error = "Worker stopped before processing completed; the job may be retried"
+        job.updated_at = now
+        job.finished_at = now
+        await chain.metadata.put_job(job)
+    return len(jobs)
+
+
 @asynccontextmanager
-async def asset_lease(redis: Any, asset_id: str) -> AsyncIterator[None]:
-    """Lease outlives the configured ARQ 1800s job timeout. All writers must use it."""
-    async with redis.lock("mediachain:lease:" + asset_id, timeout=3600, blocking_timeout=30):
+async def asset_lease(
+    redis: Any,
+    asset_id: str,
+    *,
+    lease_seconds: float = 3600,
+    renew_every: float = 300,
+) -> AsyncIterator[None]:
+    """Renew a per-asset lease until work ends so long jobs cannot lose exclusivity."""
+    lock = redis.lock(
+        "mediachain:lease:" + asset_id,
+        timeout=lease_seconds,
+        blocking_timeout=30,
+    )
+    if not await lock.acquire():
+        raise TimeoutError("Timed out waiting for media processing lease")
+
+    async def renew() -> None:
+        while True:
+            await asyncio.sleep(renew_every)
+            await lock.extend(lease_seconds, replace_ttl=True)
+
+    task = asyncio.create_task(renew())
+    try:
         yield
+    finally:
+        task.cancel()
+        with suppress(asyncio.CancelledError):
+            await task
+        await lock.release()
 
 
 async def process_media(ctx: dict[str, Any], job_id: str) -> None:

@@ -3,19 +3,24 @@
 from __future__ import annotations
 
 import asyncio
+import json
+import logging
 import secrets
-from collections.abc import AsyncIterator
+import time
+from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import Any
 
-from fastapi import Depends, FastAPI, File, HTTPException, Request, UploadFile
+from fastapi import Depends, FastAPI, File, HTTPException, Query, Request, Response, UploadFile
 from fastapi.exceptions import RequestValidationError
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import Field
 from starlette.exceptions import HTTPException as StarletteHTTPException
+from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from mediachain.core.errors import MediaChainError
 from mediachain.core.models import Document, Job, MediaAsset, Model, ModelResponse, RetrievalFilter
@@ -23,11 +28,20 @@ from mediachain.loaders.local import FORMATS
 from mediachain.runtime.client import MediaChain
 from mediachain.runtime.jobs import JobQueue, LocalJobQueue, asset_lease
 
+logger = logging.getLogger("mediachain.api")
+
 
 class QueryRequest(Model):
     question: str = Field(min_length=1, max_length=10000)
     media_ids: list[str] | None = None
     filters: RetrievalFilter | None = None
+    include_sources: bool = True
+
+
+class SummaryRequest(Model):
+    media_ids: list[str] | None = None
+    filters: RetrievalFilter | None = None
+    focus: str | None = Field(default=None, max_length=10000)
     include_sources: bool = True
 
 
@@ -72,12 +86,18 @@ def create_app(
     max_upload_bytes: int = 100 * 1024 * 1024,
     redis: Any = None,
     frontend_dir: str | Path | None = None,
+    readiness: Callable[[], Awaitable[bool]] | None = None,
+    allowed_origins: list[str] | None = None,
+    trusted_hosts: list[str] | None = None,
+    rate_limit_per_minute: int = 120,
 ) -> FastAPI:
     """Map bearer API keys to owner IDs. No unauthenticated default is provided."""
     if not api_keys and development_owner is None:
         raise ValueError("Configure API keys or explicitly opt into development_owner")
-    if max_upload_bytes <= 0 or (
-        api_keys and any(not key or not owner for key, owner in api_keys.items())
+    if (
+        max_upload_bytes <= 0
+        or rate_limit_per_minute < 0
+        or (api_keys and any(not key or not owner for key, owner in api_keys.items()))
     ):
         raise ValueError("Invalid upload limit or empty API key/owner")
     jobs = queue or LocalJobQueue(chain)
@@ -89,12 +109,81 @@ def create_app(
 
     app = FastAPI(title="MediaChain", version="0.1.0", lifespan=lifespan)
     app.add_middleware(BodyLimit, limit=max_upload_bytes + 65536)
+    if trusted_hosts:
+        app.add_middleware(TrustedHostMiddleware, allowed_hosts=trusted_hosts)
+    if allowed_origins:
+        app.add_middleware(
+            CORSMiddleware,
+            allow_origins=allowed_origins,
+            allow_credentials=False,
+            allow_methods=["GET", "POST", "DELETE", "OPTIONS"],
+            allow_headers=["Authorization", "Content-Type", "X-Request-ID"],
+        )
+
+    local_rate_limits: dict[tuple[str, int], int] = {}
+
+    @app.middleware("http")
+    async def request_context(request: Request, call_next: Any) -> Response:
+        request_id = secrets.token_hex(12)
+        started = time.perf_counter()
+        response = await call_next(request)
+        response.headers["X-Request-ID"] = request_id
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["X-Frame-Options"] = "DENY"
+        response.headers["Referrer-Policy"] = "no-referrer"
+        response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
+        logger.info(
+            json.dumps(
+                {
+                    "event": "http_request",
+                    "request_id": request_id,
+                    "method": request.method,
+                    "path": request.url.path,
+                    "status": response.status_code,
+                    "duration_ms": round((time.perf_counter() - started) * 1000, 2),
+                },
+                separators=(",", ":"),
+            )
+        )
+        return response
+
+    @app.get("/health")
+    async def health() -> dict[str, str]:
+        """Process liveness check. It intentionally exposes no configuration."""
+        return {"status": "ok"}
+
+    @app.get("/ready")
+    async def ready() -> JSONResponse:
+        available = await readiness() if readiness else True
+        return JSONResponse(
+            {"status": "ready" if available else "unavailable"},
+            status_code=200 if available else 503,
+        )
 
     async def owner(request: Request) -> str:
         authorization = request.headers.get("authorization", "")
         token = authorization[7:] if authorization.startswith("Bearer ") else ""
         for key, value in (api_keys or {}).items():
             if secrets.compare_digest(token, key):
+                if rate_limit_per_minute:
+                    window = int(time.time() // 60)
+                    if redis is not None:
+                        rate_key = f"mediachain:rate:{value}:{window}"
+                        count = int(await redis.incr(rate_key))
+                        if count == 1:
+                            await redis.expire(rate_key, 61)
+                    else:
+                        # Development fallback; production uses the shared Redis counter.
+                        for item in list(local_rate_limits):
+                            if item[1] < window:
+                                local_rate_limits.pop(item, None)
+                        identity = (value, window)
+                        count = local_rate_limits.get(identity, 0) + 1
+                        local_rate_limits[identity] = count
+                    if count > rate_limit_per_minute:
+                        raise HTTPException(
+                            429, "Rate limit exceeded", headers={"Retry-After": "60"}
+                        )
                 return value
         if development_owner is not None and not api_keys:
             return development_owner
@@ -118,17 +207,37 @@ def create_app(
         }
 
     @app.get("/api/v1/media", response_model=list[MediaAsset])
-    async def list_media(owner_id: str = Depends(owner)) -> list[MediaAsset]:
-        return await chain.metadata.list_assets(owner_id)
+    async def list_media(
+        response: Response,
+        owner_id: str = Depends(owner),
+        offset: int = Query(default=0, ge=0),
+        limit: int = Query(default=100, ge=1, le=500),
+    ) -> list[MediaAsset]:
+        response.headers["X-Total-Count"] = str(await chain.metadata.count_assets(owner_id))
+        return await chain.metadata.list_assets(owner_id, limit, offset)
 
     @app.get("/api/v1/jobs", response_model=list[Job])
-    async def list_jobs(owner_id: str = Depends(owner)) -> list[Job]:
-        return await chain.metadata.list_jobs(owner_id)
+    async def list_jobs(
+        response: Response,
+        owner_id: str = Depends(owner),
+        offset: int = Query(default=0, ge=0),
+        limit: int = Query(default=100, ge=1, le=500),
+    ) -> list[Job]:
+        response.headers["X-Total-Count"] = str(await chain.metadata.count_jobs(owner_id))
+        return await chain.metadata.list_jobs(owner_id, limit, offset)
 
     @app.get("/api/v1/media/{media_id}/documents", response_model=list[Document])
-    async def documents(media_id: str, owner_id: str = Depends(owner)) -> list[Document]:
+    async def documents(
+        media_id: str,
+        response: Response,
+        owner_id: str = Depends(owner),
+        offset: int = Query(default=0, ge=0),
+        limit: int = Query(default=100, ge=1, le=500),
+    ) -> list[Document]:
         await owned(media_id, owner_id)
-        return await chain.documents.list_documents(RetrievalFilter(media_ids=[media_id]))
+        items = await chain.documents.list_documents(RetrievalFilter(media_ids=[media_id]))
+        response.headers["X-Total-Count"] = str(len(items))
+        return items[offset : offset + limit]
 
     @app.get("/api/v1/media/{media_id}/content")
     async def content(media_id: str, owner_id: str = Depends(owner)) -> FileResponse:
@@ -150,6 +259,7 @@ def create_app(
         return JSONResponse(
             {"error": {"code": str(exc.status_code), "message": str(exc.detail)}},
             status_code=exc.status_code,
+            headers=exc.headers,
         )
 
     @app.exception_handler(MediaChainError)
@@ -251,6 +361,16 @@ def create_app(
     async def query(body: QueryRequest, owner_id: str = Depends(owner)) -> ModelResponse:
         response = await chain.ask(
             body.question, body.media_ids, owner_id=owner_id, filters=body.filters
+        )
+        return response if body.include_sources else response.model_copy(update={"sources": []})
+
+    @app.post("/api/v1/summarize", response_model=ModelResponse)
+    async def summarize(body: SummaryRequest, owner_id: str = Depends(owner)) -> ModelResponse:
+        response = await chain.summarize(
+            body.media_ids,
+            owner_id=owner_id,
+            filters=body.filters,
+            focus=body.focus,
         )
         return response if body.include_sources else response.model_copy(update={"sources": []})
 

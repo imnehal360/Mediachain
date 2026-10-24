@@ -61,3 +61,6 @@ class RedisCache:
 
     async def close(self) -> None:
         await self.client.aclose()
+
+    async def healthcheck(self) -> bool:
+        return bool(await self.client.ping())

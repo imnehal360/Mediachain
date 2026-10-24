@@ -16,11 +16,15 @@ def point_id(document_id: str) -> str:
 
 class QdrantVectorStore:
     def __init__(
-        self, url: str = "http://localhost:6333", collection: str = "mediachain", client: Any = None
+        self,
+        url: str = "http://localhost:6333",
+        collection: str = "mediachain",
+        api_key: str | None = None,
+        client: Any = None,
     ):
         from qdrant_client import AsyncQdrantClient
 
-        self.client = client or AsyncQdrantClient(url=url)
+        self.client = client or AsyncQdrantClient(url=url, api_key=api_key)
         self.collection = collection
         self._collections: set[str] = set()
         self._lock = asyncio.Lock()
@@ -41,6 +45,20 @@ class QdrantVectorStore:
                         )
                     except Exception:
                         if not await self.client.collection_exists(name):
+                            raise
+                info = await self.client.get_collection(name)
+                if "asset_id" not in info.payload_schema:
+                    try:
+                        await self.client.create_payload_index(
+                            collection_name=name,
+                            field_name="asset_id",
+                            field_schema=models.PayloadSchemaType.KEYWORD,
+                            wait=True,
+                        )
+                    except Exception:
+                        # Another API/worker replica may have created it concurrently.
+                        info = await self.client.get_collection(name)
+                        if "asset_id" not in info.payload_schema:
                             raise
                 self._collections.add(name)
         return name
@@ -108,3 +126,7 @@ class QdrantVectorStore:
 
     async def close(self) -> None:
         await self.client.close()
+
+    async def healthcheck(self) -> bool:
+        await self.client.get_collections()
+        return True

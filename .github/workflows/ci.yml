@@ -2,7 +2,7 @@ name: checks
 on: [push, pull_request]
 jobs:
   test:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
       matrix:
@@ -19,3 +19,70 @@ jobs:
       - run: uv run ruff format --check .
       - run: uv run mypy src/mediachain
       - run: uv build
+  frontend:
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+      - run: npm run build
+      - run: npx playwright install --with-deps chromium
+      - run: npm test
+  infrastructure:
+    runs-on: ubuntu-24.04
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: mediachain
+          POSTGRES_USER: mediachain
+          POSTGRES_PASSWORD: mediachain
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U mediachain -d mediachain"
+          --health-interval 2s
+          --health-timeout 3s
+          --health-retries 30
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 2s
+          --health-timeout 3s
+          --health-retries 30
+      qdrant:
+        image: qdrant/qdrant:v1.19.0
+        ports:
+          - 6333:6333
+    env:
+      MEDIACHAIN_TEST_POSTGRES: postgresql://mediachain:mediachain@127.0.0.1:5432/mediachain
+      MEDIACHAIN_TEST_REDIS: redis://127.0.0.1:6379/0
+      MEDIACHAIN_TEST_QDRANT: http://127.0.0.1:6333
+    steps:
+      - uses: actions/checkout@v6
+      - uses: astral-sh/setup-uv@v7
+        with:
+          python-version: '3.11'
+      - run: curl --fail --retry 30 --retry-delay 2 --retry-all-errors http://127.0.0.1:6333/readyz
+      - run: uv sync --frozen --dev --extra server
+      - run: uv run pytest -q tests/integration/test_services.py tests/integration/test_qdrant.py
+  compose-smoke:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+      - run: docker compose -f docker-compose.test.yml up --build --detach
+      - run: bash tests/smoke/compose.sh
+      - if: always()
+        run: docker compose -f docker-compose.test.yml logs --no-color
+      - if: always()
+        run: docker compose -f docker-compose.test.yml down --volumes --remove-orphans
