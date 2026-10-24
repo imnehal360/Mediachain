@@ -74,7 +74,7 @@ normalization means input blocks do not correspond one-to-one with indexed chunk
   asyncpg adapter imports and type-checks.
 - Docker Compose deployment: Docker was not available. Build/deployment files are provided but the
   containers and Linux dependency installation have not been exercised here. CI now contains both
-  PostgreSQL/Redis/Qdrant service tests and a PostgreSQL/Redis/Qdrant/MinIO API-worker smoke test.
+  PostgreSQL/Redis/Qdrant service tests and a PostgreSQL/Redis/Qdrant/SeaweedFS API-worker smoke test.
 - Real Faster-Whisper/Sentence Transformers downloads, hosted/local VLM inference and real chat
   generation: no model artifacts or configured inference endpoint/credentials were supplied. The
   reference video application uses real adapters; deterministic test outputs are never represented

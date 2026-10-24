@@ -101,7 +101,7 @@ bash tests/smoke/compose.sh
 docker compose -f docker-compose.test.yml down --volumes --remove-orphans
 ```
 
-This test-only stack starts PostgreSQL, Redis, Qdrant, and MinIO alongside the API and ARQ worker.
+This test-only stack starts PostgreSQL, Redis, Qdrant, and SeaweedFS alongside the API and ARQ worker.
 The smoke test uploads and processes text through the public API, checks grounded retrieval, restarts
 the API and worker, checks persisted retrieval again, and deletes the asset. It binds only the API to
 `127.0.0.1:18000`; disposable service ports remain internal. Do not use its fixed test credentials
