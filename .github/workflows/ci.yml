@@ -2,7 +2,7 @@ name: checks
 on: [push, pull_request]
 jobs:
   test:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
       matrix:
@@ -20,7 +20,7 @@ jobs:
       - run: uv run mypy src/mediachain
       - run: uv build
   frontend:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     defaults:
       run:
         working-directory: frontend
@@ -36,7 +36,7 @@ jobs:
       - run: npx playwright install --with-deps chromium
       - run: npm test
   infrastructure:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     services:
       postgres:
         image: postgres:16-alpine
@@ -77,7 +77,7 @@ jobs:
       - run: uv sync --frozen --dev --extra server
       - run: uv run pytest -q tests/integration/test_services.py tests/integration/test_qdrant.py
   compose-smoke:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v6
       - run: docker compose -f docker-compose.test.yml up --build --detach
