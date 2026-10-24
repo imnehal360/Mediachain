@@ -52,7 +52,7 @@ test "${job_status}" = "completed"
 
 query_response=$(curl --fail --silent --show-error \
   -H "${auth_header}" -H "Content-Type: application/json" \
-  -d "{\"question\":\"What does this say about artificial intelligence?\",\"media_ids\":[\"${asset_id}\"]}" \
+  -d "{\"question\":\"What does MediaChain turn into searchable evidence?\",\"media_ids\":[\"${asset_id}\"]}" \
   "${base_url}/api/v1/query")
 printf '%s' "${query_response}" | python3 -c \
   "import json,sys; body=json.load(sys.stdin); assert body['sources'][0]['media_id'] == '${asset_id}'"
@@ -66,7 +66,7 @@ printf '%s' "${listing}" | python3 -c \
 
 query_response=$(curl --fail --silent --show-error \
   -H "${auth_header}" -H "Content-Type: application/json" \
-  -d "{\"question\":\"artificial intelligence\",\"media_ids\":[\"${asset_id}\"]}" \
+  -d "{\"question\":\"searchable timestamped evidence\",\"media_ids\":[\"${asset_id}\"]}" \
   "${base_url}/api/v1/query")
 printf '%s' "${query_response}" | python3 -c \
   "import json,sys; body=json.load(sys.stdin); assert body['sources'][0]['media_id'] == '${asset_id}'"
