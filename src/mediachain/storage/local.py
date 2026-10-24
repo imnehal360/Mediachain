@@ -51,11 +51,20 @@ class SQLiteStore:
         rows = await self._execute("SELECT body FROM assets WHERE id=?", (asset_id,), True)
         return MediaAsset.model_validate_json(rows[0][0]) if rows else None
 
-    async def list_assets(self, owner_id: str) -> list[MediaAsset]:
-        rows = await self._execute(
-            "SELECT body FROM assets WHERE owner=? ORDER BY id", (owner_id,), True
-        )
+    async def list_assets(
+        self, owner_id: str, limit: int | None = None, offset: int = 0
+    ) -> list[MediaAsset]:
+        sql = "SELECT body FROM assets WHERE owner=? ORDER BY id"
+        args: tuple[Any, ...] = (owner_id,)
+        if limit is not None:
+            sql += " LIMIT ? OFFSET ?"
+            args += (limit, offset)
+        rows = await self._execute(sql, args, True)
         return [MediaAsset.model_validate_json(row[0]) for row in rows]
+
+    async def count_assets(self, owner_id: str) -> int:
+        rows = await self._execute("SELECT COUNT(*) FROM assets WHERE owner=?", (owner_id,), True)
+        return int(rows[0][0])
 
     async def delete_asset(self, asset_id: str) -> None:
         def delete() -> None:
@@ -105,13 +114,33 @@ class SQLiteStore:
         rows = await self._execute("SELECT body FROM jobs WHERE id=?", (job_id,), True)
         return Job.model_validate_json(rows[0][0]) if rows else None
 
-    async def list_jobs(self, owner_id: str) -> list[Job]:
+    async def list_jobs(
+        self, owner_id: str, limit: int | None = None, offset: int = 0
+    ) -> list[Job]:
+        sql = "SELECT jobs.body FROM jobs JOIN assets ON jobs.asset_id=assets.id WHERE assets.owner=? ORDER BY jobs.id"
+        args: tuple[Any, ...] = (owner_id,)
+        if limit is not None:
+            sql += " LIMIT ? OFFSET ?"
+            args += (limit, offset)
+        rows = await self._execute(sql, args, True)
+        return [Job.model_validate_json(row[0]) for row in rows]
+
+    async def count_jobs(self, owner_id: str) -> int:
         rows = await self._execute(
-            "SELECT jobs.body FROM jobs JOIN assets ON jobs.asset_id=assets.id WHERE assets.owner=?",
+            "SELECT COUNT(*) FROM jobs JOIN assets ON jobs.asset_id=assets.id WHERE assets.owner=?",
             (owner_id,),
             True,
         )
-        return [Job.model_validate_json(row[0]) for row in rows]
+        return int(rows[0][0])
+
+    async def list_stale_jobs(self, updated_before: float) -> list[Job]:
+        rows = await self._execute("SELECT body FROM jobs", read=True)
+        return [
+            job
+            for row in rows
+            if (job := Job.model_validate_json(row[0])).status == "running"
+            and job.updated_at < updated_before
+        ]
 
 
 class FileObjectStore:

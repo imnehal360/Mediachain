@@ -107,3 +107,38 @@ async def test_grounded_citations_and_no_evidence():
     assert (
         await RAGEngine(Retriever(), model, ContextBuilder(1)).ask("revenue")
     ).insufficient_evidence
+
+
+async def test_optional_answer_verification():
+    from mediachain.core.models import RetrievalResult
+
+    class Retriever:
+        async def retrieve(self, query, filters=None, limit=8):
+            return [RetrievalResult(document=doc("d"), score=1)]
+
+    class AnswerModel:
+        model_id, model_version = "answer", "1"
+
+        async def generate(self, messages):
+            return ChatOutput(
+                content=json.dumps({"answer": "Revenue grew", "citation_ids": ["d"]}),
+                token_usage=3,
+            )
+
+    class Verifier:
+        model_id, model_version = "verifier", "1"
+        supported = True
+
+        async def generate(self, messages):
+            return ChatOutput(
+                content=json.dumps({"supported": self.supported, "reason": "checked"}),
+                token_usage=2,
+            )
+
+    verifier = Verifier()
+    response = await RAGEngine(Retriever(), AnswerModel(), verifier=verifier).ask("revenue")
+    assert response.metadata["verified"] is True
+    assert response.token_usage == 5
+    verifier.supported = False
+    with pytest.raises(GroundingError, match="failed evidence verification"):
+        await RAGEngine(Retriever(), AnswerModel(), verifier=verifier).ask("revenue")

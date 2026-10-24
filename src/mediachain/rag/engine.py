@@ -26,6 +26,11 @@ class AnswerPayload(Model):
     insufficient_evidence: bool = False
 
 
+class VerificationPayload(Model):
+    supported: bool
+    reason: str = ""
+
+
 class ContextBuilder:
     def __init__(self, max_chars: int = 24000):
         if max_chars <= 0:
@@ -71,8 +76,10 @@ class RAGEngine:
         retriever: Retriever,
         llm: ChatModel | None = None,
         context_builder: ContextBuilder | None = None,
+        verifier: ChatModel | None = None,
     ):
         self.retriever, self.llm = retriever, llm
+        self.verifier = verifier
         self.context_builder = context_builder or ContextBuilder()
         self.formatter = ResponseFormatter()
 
@@ -121,4 +128,41 @@ class RAGEngine:
             raise GroundingError(
                 "Model did not return the required grounded answer schema"
             ) from exc
-        return self.formatter.format(payload, included, output.token_usage)
+        response = self.formatter.format(payload, included, output.token_usage)
+        if self.verifier and not response.insufficient_evidence:
+            cited = [
+                result.document.content
+                for result in included
+                if result.document.id in payload.citation_ids
+            ]
+            with span(ctx, "model.verify"):
+                verification_output = await self.verifier.generate(
+                    [
+                        ChatMessage(
+                            role="system",
+                            content=(
+                                "Determine whether every factual claim in the answer is supported by the evidence. "
+                                "Return only JSON with supported (boolean) and reason (string)."
+                            ),
+                        ),
+                        ChatMessage(
+                            role="user",
+                            content=json.dumps({"answer": response.answer, "evidence": cited}),
+                        ),
+                    ]
+                )
+            ctx.token_usage += verification_output.token_usage or 0
+            try:
+                verification = VerificationPayload.model_validate_json(verification_output.content)
+            except ValueError as exc:
+                raise GroundingError("Verifier did not return the required schema") from exc
+            if not verification.supported:
+                raise GroundingError("Generated answer failed evidence verification")
+            response = response.model_copy(
+                update={
+                    "token_usage": (response.token_usage or 0)
+                    + (verification_output.token_usage or 0),
+                    "metadata": {**response.metadata, "verified": True},
+                }
+            )
+        return response

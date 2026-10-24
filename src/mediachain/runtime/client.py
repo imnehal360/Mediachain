@@ -12,11 +12,13 @@ from mediachain.core.errors import ConfigurationError
 from mediachain.core.interfaces import (
     Cache,
     ChatModel,
+    DiarizationModel,
     DocumentStore,
     EmbeddingModel,
     Loader,
     MetadataStore,
     ObjectStore,
+    OCRModel,
     Processor,
     SpeechToTextModel,
     VectorStore,
@@ -73,7 +75,10 @@ class MediaChain:
         *,
         llm: ChatModel | None = None,
         speech: SpeechToTextModel | None = None,
+        diarization: DiarizationModel | None = None,
         vision: VisionModel | None = None,
+        ocr: OCRModel | None = None,
+        verifier: ChatModel | None = None,
         embeddings: EmbeddingModel | None = None,
         vector_store: VectorStore | None = None,
         document_store: DocumentStore | None = None,
@@ -98,14 +103,24 @@ class MediaChain:
         self.vectors = vector_store or MemoryVectorStore()
         self.cache = cache or MemoryCache()
         self.loader = loader or LocalLoader(self.config.max_file_bytes)
-        self.processors: dict[Modality, Processor] = {Modality.TEXT: TextProcessor(self.config)}
-        audio = AudioProcessor(speech, timeout=self.config.model_timeout) if speech else None
+        self.processors: dict[Modality, Processor] = {
+            Modality.TEXT: TextProcessor(self.config, ocr)
+        }
+        audio = (
+            AudioProcessor(
+                speech,
+                diarization=diarization,
+                timeout=self.config.model_timeout,
+            )
+            if speech
+            else None
+        )
         if audio:
             self.processors[Modality.AUDIO] = audio
         if vision:
             self.processors[Modality.VIDEO] = VideoProcessor(vision, audio, config=self.config)
         self.retriever = HybridRetriever(self.documents, self.vectors, self.embeddings)
-        self.rag = RAGEngine(self.retriever, llm)
+        self.rag = RAGEngine(self.retriever, llm, verifier=verifier)
         self._locks: dict[str, asyncio.Lock] = {}
         self._ready: set[str] = set()
 
@@ -195,6 +210,10 @@ class MediaChain:
             asset = await self.metadata.get_asset(asset_id)
             if asset is None:
                 raise KeyError(asset_id)
+            if key := asset.metadata.get("object_key"):
+                resolved = await self.objects.resolve(key)
+                if str(resolved) != asset.source:
+                    asset = asset.model_copy(update={"source": str(resolved)})
             processor = self.processors.get(asset.media_type)
             if processor is None:
                 raise ConfigurationError(
