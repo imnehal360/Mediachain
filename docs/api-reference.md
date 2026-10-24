@@ -40,6 +40,12 @@
 
 ::: mediachain.models.HTTPVisionModel
 
+::: mediachain.models.HTTPSpeechModel
+
+::: mediachain.models.HTTPDiarizationModel
+
+::: mediachain.models.HTTPEmbeddingModel
+
 ::: mediachain.models.FasterWhisperSpeech
 
 ## Storage
@@ -53,3 +59,7 @@
 ::: mediachain.storage.QdrantVectorStore
 
 ::: mediachain.storage.RedisCache
+
+::: mediachain.storage.S3ObjectStore
+
+::: mediachain.processors.VisionPDFOCR

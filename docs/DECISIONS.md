@@ -36,8 +36,8 @@
     development-owner mode must be selected deliberately. Upload byte limits are enforced while
     receiving the request as well as while copying its file.
 14. Base package APIs deliberately expose extractive results without a configured LLM. TTS,
-    diarization and native media embeddings have typed extension contracts; no fabricated baseline
-    implementation is supplied. OCR for scanned PDF pages is not implemented.
+    native media embeddings have a typed extension contract; no fabricated baseline implementation
+    is supplied. Hosted diarization and vision-backed scanned-PDF OCR are optional adapters.
 15. Foundation validation initially used already-downloaded dependency archives while the native
     development dependencies finished downloading. Full installed-environment checks subsequently
     replaced those preliminary checks; see VALIDATION.md for the final executed commands.

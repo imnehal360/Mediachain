@@ -11,7 +11,8 @@ Core serializable types live in `core/models.py`. Models reject extra fields and
 | ChatModel | ChatMessage[] → ChatOutput | HTTPChatModel |
 | VisionModel | image path, prompt → description | HTTPVisionModel |
 | SpeechToTextModel | audio path → SpeechSegment[] | FasterWhisperSpeech |
-| DiarizationModel | audio path → speaker-labeled SpeechSegment[] | User-provided optional adapter |
+| DiarizationModel | audio path → speaker-labeled SpeechSegment[] | Hosted adapter or user implementation |
+| OCRModel | PDF path → page text[] | Vision-backed hosted adapter or user implementation |
 | TextToSpeechModel | text, destination → path | Extension contract |
 | EmbeddingModel | text[] → vector[]; space | HashEmbeddings, SentenceTransformerEmbeddings |
 | NativeMediaEmbeddingModel | paths → vector[]; space | Extension contract |
