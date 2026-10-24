@@ -1,0 +1,95 @@
+name: mediachain-test
+
+x-app: &app
+  build: .
+  environment: &app-environment
+    DATABASE_URL: postgresql://mediachain:mediachain@postgres:5432/mediachain
+    REDIS_URL: redis://redis:6379/0
+    QDRANT_URL: http://qdrant:6333
+    S3_BUCKET: mediachain-test
+    S3_PREFIX: smoke
+    S3_ENDPOINT_URL: http://minio:9000
+    AWS_REGION: us-east-1
+    AWS_ACCESS_KEY_ID: mediachain
+    AWS_SECRET_ACCESS_KEY: mediachain-secret
+    MEDIACHAIN_API_KEYS: '{"ci-test-key":"ci-owner"}'
+    MEDIACHAIN_REQUIRE_HOSTED_SERVICES: "true"
+    MEDIACHAIN_DATA_DIR: /data
+    MEDIACHAIN_FRONTEND_DIR: /app/frontend/dist
+  depends_on:
+    postgres:
+      condition: service_healthy
+    redis:
+      condition: service_healthy
+    qdrant:
+      condition: service_started
+    minio-init:
+      condition: service_completed_successfully
+  volumes:
+    - media-cache:/data
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: mediachain
+      POSTGRES_USER: mediachain
+      POSTGRES_PASSWORD: mediachain
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U mediachain -d mediachain"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+    volumes:
+      - redis-data:/data
+
+  qdrant:
+    image: qdrant/qdrant:v1.19.0
+    volumes:
+      - qdrant-data:/qdrant/storage
+
+  minio:
+    image: minio/minio:RELEASE.2024-05-10T01-41-38Z
+    command: ["server", "/data", "--console-address", ":9001"]
+    environment:
+      MINIO_ROOT_USER: mediachain
+      MINIO_ROOT_PASSWORD: mediachain-secret
+    volumes:
+      - minio-data:/data
+
+  minio-init:
+    image: minio/mc:RELEASE.2024-05-09T17-04-24Z
+    depends_on:
+      - minio
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - >-
+        until mc alias set local http://minio:9000 mediachain mediachain-secret; do sleep 1; done;
+        mc mb --ignore-existing local/mediachain-test
+
+  api:
+    <<: *app
+    ports:
+      - "127.0.0.1:18000:8000"
+
+  worker:
+    <<: *app
+    command: ["arq", "mediachain.runtime.server.WorkerSettings"]
+
+volumes:
+  media-cache:
+  postgres-data:
+  redis-data:
+  qdrant-data:
+  minio-data:
