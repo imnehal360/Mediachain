@@ -28,6 +28,22 @@ uv sync --dev
 uv run python examples/text_qa.py notes.txt "What does this say about artificial intelligence?"
 ```
 
+### Complete local application on Windows
+
+The repository can run without hosted databases, object storage, queues, or model APIs. After
+creating `.venv`, install FFmpeg and Ollama, provide Node.js in `.tools/node` or on `PATH`, copy
+`.env.local.example` to `.env`, and replace the example workspace key. Then run:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\setup-local.ps1
+powershell -ExecutionPolicy Bypass -File .\scripts\start-local.ps1
+```
+
+Open `http://127.0.0.1:8000` and enter the workspace key printed by the start script. Local mode
+uses SQLite, filesystem object storage, an in-process job queue, MiniLM embeddings, Faster Whisper,
+and Ollama. The setup command needs internet access once to download frontend packages and model
+files; normal use does not call hosted services.
+
 If macOS ignores uv's generated editable `.pth` file because it has a hidden filesystem flag, use
 `uv sync --no-editable --dev`. The test suite also adds `src` to its import path explicitly.
 
