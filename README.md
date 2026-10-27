@@ -31,18 +31,33 @@ uv run python examples/text_qa.py notes.txt "What does this say about artificial
 ### Complete local application on Windows
 
 The repository can run without hosted databases, object storage, queues, or model APIs. After
-creating `.venv`, install FFmpeg and Ollama, provide Node.js in `.tools/node` or on `PATH`, copy
-`.env.local.example` to `.env`, and replace the example workspace key. Then run:
+creating `.venv`, install FFmpeg and Ollama, provide Node.js in `.tools/node` or on `PATH`, and copy
+`.env.local.example` to `.env`. Then run:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\scripts\setup-local.ps1
 powershell -ExecutionPolicy Bypass -File .\scripts\start-local.ps1
 ```
 
-Open `http://127.0.0.1:8000` and enter the workspace key printed by the start script. Local mode
+Open `http://127.0.0.1:8000`; the local configuration opens without a workspace key and rejects
+non-loopback clients. Set `MEDIACHAIN_DISABLE_AUTH=false` and configure `MEDIACHAIN_API_KEYS` to
+restore authenticated access. Local mode
 uses SQLite, filesystem object storage, an in-process job queue, MiniLM embeddings, Faster Whisper,
 and Ollama. The setup command needs internet access once to download frontend packages and model
 files; normal use does not call hosted services.
+
+The web workspace offers two question modes. **Quick Answer** performs one grounded retrieval and
+generation pass. **Agent Analysis** can choose multiple owner-scoped, read-only text, transcript,
+video, and timeline tools before answering with validated citations. Agent runs have configurable
+step, tool-call, token, observation, and timeout limits; an unsupported agent draft falls back to
+the standard grounded RAG path rather than being returned.
+
+To ingest a public YouTube video, paste one `youtube.com` or `youtu.be` video URL into the
+library's URL field. MediaChain downloads a bounded 480p copy with yt-dlp, stores it locally, and
+starts the same transcription and visual-analysis pipeline used for uploaded videos. Playlists,
+channels, live/upcoming streams, non-YouTube hosts, videos over 4 hours, and downloads over 500 MB
+are rejected by default. Only import media you own or have permission to process. YouTube changes
+frequently, so keep the locked yt-dlp dependency current when imports begin failing.
 
 If macOS ignores uv's generated editable `.pth` file because it has a hidden filesystem flag, use
 `uv sync --no-editable --dev`. The test suite also adds `src` to its import path explicitly.

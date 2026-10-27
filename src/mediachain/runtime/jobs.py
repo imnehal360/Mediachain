@@ -3,14 +3,18 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import time
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager, suppress
 from typing import Any, Protocol
 from uuid import uuid4
 
+from mediachain.core.errors import MediaChainError
 from mediachain.core.models import ExecutionContext, Job
 from mediachain.runtime.client import MediaChain
+
+logger = logging.getLogger("mediachain.jobs")
 
 
 class JobQueue(Protocol):
@@ -46,10 +50,15 @@ class LocalJobQueue:
         except asyncio.CancelledError:
             job.status = "cancelled"
             raise
-        except Exception:
+        except Exception as exc:
+            logger.exception(
+                "Media processing failed",
+                extra={"media_id": job.media_id, "job_id": job.id},
+            )
+            category = exc.code if isinstance(exc, MediaChainError) else type(exc).__name__
             job.status, job.error = (
                 "failed",
-                "Processing failed; inspect configured providers and server traces",
+                f"Processing failed ({category}); inspect the server traceback",
             )
         finally:
             job.updated_at = time.time()

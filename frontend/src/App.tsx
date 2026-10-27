@@ -7,6 +7,7 @@ import {
   FileText,
   FileVideo,
   Library,
+  Link2,
   LoaderCircle,
   LogOut,
   MessageSquareText,
@@ -21,7 +22,7 @@ import {
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { ApiError, api } from './api';
-import type { Job, MediaAsset, ModelResponse, SourceReference, WorkspaceConfig } from './types';
+import type { AgentToolCall, Job, MediaAsset, ModelResponse, SourceReference, WorkspaceConfig } from './types';
 
 type View = 'library' | 'ask';
 
@@ -113,13 +114,16 @@ function UploadPanel({
   config,
   busy,
   onUpload,
+  onUrlUpload,
 }: {
   config: WorkspaceConfig;
   busy: boolean;
   onUpload: (file: File) => void;
+  onUrlUpload: (url: string) => void;
 }) {
   const input = useRef<HTMLInputElement>(null);
   const [dragging, setDragging] = useState(false);
+  const [url, setUrl] = useState('');
   const accept = config.formats.join(',');
 
   function pick(files: FileList | null) {
@@ -127,21 +131,30 @@ function UploadPanel({
   }
 
   return (
-    <div
+    <div className="ingestion-panel">
+      <div
       className={`upload-zone ${dragging ? 'dragging' : ''}`}
       onDragOver={(event) => { event.preventDefault(); setDragging(true); }}
       onDragLeave={() => setDragging(false)}
       onDrop={(event) => { event.preventDefault(); setDragging(false); pick(event.dataTransfer.files); }}
-    >
-      <input ref={input} type="file" accept={accept} onChange={(event) => pick(event.target.files)} hidden />
-      <div className="upload-icon">{busy ? <LoaderCircle className="spin" /> : <UploadCloud />}</div>
-      <div>
-        <strong>{busy ? 'Uploading media…' : 'Drop media here'}</strong>
-        <p>{config.formats.join(' · ')} · up to {formatBytes(config.max_upload_bytes)}</p>
+      >
+        <input ref={input} type="file" accept={accept} onChange={(event) => pick(event.target.files)} hidden />
+        <div className="upload-icon">{busy ? <LoaderCircle className="spin" /> : <UploadCloud />}</div>
+        <div>
+          <strong>{busy ? 'Importing media…' : 'Drop media here'}</strong>
+          <p>{config.formats.join(' · ')} · up to {formatBytes(config.max_upload_bytes)}</p>
+        </div>
+        <button className="secondary-button" onClick={() => input.current?.click()} disabled={busy}>
+          <Plus size={16} /> Choose file
+        </button>
       </div>
-      <button className="secondary-button" onClick={() => input.current?.click()} disabled={busy}>
-        <Plus size={16} /> Choose file
-      </button>
+      {config.youtube_url_enabled && (
+        <form className="url-import" onSubmit={(event) => { event.preventDefault(); if (url.trim()) { onUrlUpload(url.trim()); setUrl(''); } }}>
+          <Link2 size={17} />
+          <input type="url" value={url} onChange={(event) => setUrl(event.target.value)} placeholder="Paste a public YouTube video URL" disabled={busy} required />
+          <button className="secondary-button" disabled={busy || !url.trim()}>{busy ? 'Importing…' : 'Add video'}</button>
+        </form>
+      )}
     </div>
   );
 }
@@ -152,6 +165,7 @@ function MediaLibrary({
   config,
   uploading,
   onUpload,
+  onUrlUpload,
   onProcess,
   onDelete,
 }: {
@@ -160,6 +174,7 @@ function MediaLibrary({
   config: WorkspaceConfig;
   uploading: boolean;
   onUpload: (file: File) => void;
+  onUrlUpload: (url: string) => void;
   onProcess: (id: string) => void;
   onDelete: (id: string) => void;
 }) {
@@ -179,7 +194,7 @@ function MediaLibrary({
         <div><p className="eyebrow">Workspace</p><h2>Your media</h2></div>
         <div className="search-box"><Search size={17} /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search media" /></div>
       </header>
-      <UploadPanel config={config} busy={uploading} onUpload={onUpload} />
+      <UploadPanel config={config} busy={uploading} onUpload={onUpload} onUrlUpload={onUrlUpload} />
       <div className="section-heading"><h3>Library</h3><span>{filtered.length} item{filtered.length === 1 ? '' : 's'}</span></div>
       {filtered.length === 0 ? (
         <div className="empty-state"><Library size={28} /><h3>No media yet</h3><p>Upload your first file to begin.</p></div>
@@ -219,7 +234,7 @@ function MediaLibrary({
   );
 }
 
-function AskWorkspace({ assets, jobs, apiKey }: { assets: MediaAsset[]; jobs: Job[]; apiKey: string }) {
+function AskWorkspace({ assets, jobs, apiKey, agentAvailable }: { assets: MediaAsset[]; jobs: Job[]; apiKey: string; agentAvailable: boolean }) {
   const [selected, setSelected] = useState<string[]>([]);
   const [question, setQuestion] = useState('');
   const [response, setResponse] = useState<ModelResponse | null>(null);
@@ -227,6 +242,7 @@ function AskWorkspace({ assets, jobs, apiKey }: { assets: MediaAsset[]; jobs: Jo
   const [error, setError] = useState('');
   const [activeSource, setActiveSource] = useState<SourceReference | null>(null);
   const [mediaUrl, setMediaUrl] = useState('');
+  const [queryMode, setQueryMode] = useState<'quick' | 'agent'>('quick');
   const readyIds = useMemo(() => {
     const latest = new Map<string, Job>();
     [...jobs].sort((a, b) => b.created_at - a.created_at).forEach((job) => {
@@ -252,7 +268,9 @@ function AskWorkspace({ assets, jobs, apiKey }: { assets: MediaAsset[]; jobs: Jo
     setActiveSource(null);
     try {
       const result = mode === 'ask'
-        ? await api.ask(apiKey, question.trim(), selected)
+        ? queryMode === 'agent'
+          ? await api.agent(apiKey, question.trim(), selected)
+          : await api.ask(apiKey, question.trim(), selected)
         : await api.summarize(apiKey, selected, question.trim());
       setResponse(result);
     } catch (reason) {
@@ -263,6 +281,7 @@ function AskWorkspace({ assets, jobs, apiKey }: { assets: MediaAsset[]; jobs: Jo
   }
 
   const sourceAsset = activeSource && assets.find((asset) => asset.id === activeSource.media_id);
+  const toolCalls = (response?.metadata.tool_calls as AgentToolCall[] | undefined) || [];
 
   useEffect(() => {
     if (!sourceAsset || sourceAsset.media_type === 'text') {
@@ -306,11 +325,15 @@ function AskWorkspace({ assets, jobs, apiKey }: { assets: MediaAsset[]; jobs: Jo
         </aside>
         <div className="answer-panel">
           <div className="question-box">
+            <div className="query-mode" aria-label="Answer mode">
+              <button className={queryMode === 'quick' ? 'active' : ''} onClick={() => setQueryMode('quick')}>Quick Answer</button>
+              <button className={queryMode === 'agent' ? 'active' : ''} onClick={() => setQueryMode('agent')} disabled={!agentAvailable} title={agentAvailable ? 'Use multiple media tools' : 'A chat model is required'}>Agent Analysis</button>
+            </div>
             <textarea value={question} onChange={(event) => setQuestion(event.target.value)} placeholder="Ask a question, or enter a focus for the summary…" rows={3} />
             <div className="question-actions">
               <button className="secondary-button" onClick={() => run('summarize')} disabled={busy || readyAssets.length === 0}><Sparkles size={16} /> Summarize</button>
               <button className="primary-button" onClick={() => run('ask')} disabled={busy || !question.trim() || readyAssets.length === 0}>
-                {busy ? <LoaderCircle className="spin" size={17} /> : <MessageSquareText size={17} />} Ask
+                {busy ? <LoaderCircle className="spin" size={17} /> : <MessageSquareText size={17} />} {queryMode === 'agent' ? 'Analyze' : 'Ask'}
               </button>
             </div>
           </div>
@@ -318,11 +341,19 @@ function AskWorkspace({ assets, jobs, apiKey }: { assets: MediaAsset[]; jobs: Jo
           {!response && !busy && (
             <div className="answer-empty"><div><span /><span /><span /></div><h3>Answers anchored to evidence</h3><p>Every response points back to the exact source and moment.</p></div>
           )}
-          {busy && <div className="answer-empty"><LoaderCircle className="spin" /><h3>Searching your evidence…</h3></div>}
+          {busy && <div className="answer-empty"><LoaderCircle className="spin" /><h3>{queryMode === 'agent' ? 'Agent is investigating your media…' : 'Searching your evidence…'}</h3></div>}
           {response && (
             <div className="response">
               <p className="eyebrow">Answer</p>
               <div className="answer-text">{response.answer}</div>
+              {toolCalls.length > 0 && (
+                <div className="agent-activity">
+                  <h3>Agent activity</h3>
+                  {toolCalls.map((call, index) => (
+                    <div key={`${call.tool}-${index}`}><Sparkles size={13} /><span>{call.tool.replaceAll('_', ' ')}</span><small>{call.result_count} result{call.result_count === 1 ? '' : 's'}</small></div>
+                  ))}
+                </div>
+              )}
               {response.sources.length > 0 && (
                 <div className="citations">
                   <h3>Evidence</h3>
@@ -354,8 +385,9 @@ function AskWorkspace({ assets, jobs, apiKey }: { assets: MediaAsset[]; jobs: Jo
 }
 
 export default function App() {
-  const [apiKey, setApiKey] = useState('');
+  const [apiKey, setApiKey] = useState<string | null>(null);
   const [config, setConfig] = useState<WorkspaceConfig | null>(null);
+  const [initializing, setInitializing] = useState(true);
   const [assets, setAssets] = useState<MediaAsset[]>([]);
   const [jobs, setJobs] = useState<Job[]>([]);
   const [view, setView] = useState<View>('library');
@@ -363,23 +395,37 @@ export default function App() {
   const [error, setError] = useState('');
 
   const refresh = useCallback(async (key = apiKey) => {
-    if (!key) return;
+    if (key === null) return;
     const [nextAssets, nextJobs] = await Promise.all([api.media(key), api.jobs(key)]);
     setAssets(nextAssets);
     setJobs(nextJobs);
   }, [apiKey]);
 
   useEffect(() => {
-    const saved = sessionStorage.getItem('mediachain_api_key');
-    if (!saved) return;
-    api.config(saved).then((next) => {
-      setApiKey(saved);
-      setConfig(next);
-    }).catch(() => sessionStorage.removeItem('mediachain_api_key'));
+    async function connect() {
+      try {
+        const next = await api.config('');
+        setApiKey('');
+        setConfig(next);
+        return;
+      } catch (reason) {
+        if (!(reason instanceof ApiError) || reason.status !== 401) return;
+      }
+      const saved = sessionStorage.getItem('mediachain_api_key');
+      if (!saved) return;
+      try {
+        const next = await api.config(saved);
+        setApiKey(saved);
+        setConfig(next);
+      } catch {
+        sessionStorage.removeItem('mediachain_api_key');
+      }
+    }
+    connect().finally(() => setInitializing(false));
   }, []);
 
   useEffect(() => {
-    if (!apiKey) return;
+    if (apiKey === null) return;
     refresh().catch((reason) => setError(reason instanceof Error ? reason.message : 'Could not load workspace'));
   }, [apiKey, refresh]);
 
@@ -390,6 +436,7 @@ export default function App() {
   }, [jobs, refresh]);
 
   async function upload(file: File) {
+    if (apiKey === null) return;
     setUploading(true);
     setError('');
     try {
@@ -404,7 +451,24 @@ export default function App() {
     }
   }
 
+  async function uploadUrl(url: string) {
+    if (apiKey === null) return;
+    setUploading(true);
+    setError('');
+    try {
+      const asset = await api.uploadUrl(apiKey, url);
+      setAssets((items) => [asset, ...items]);
+      const job = await api.process(apiKey, asset.id);
+      setJobs((items) => [job, ...items]);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'YouTube import failed');
+    } finally {
+      setUploading(false);
+    }
+  }
+
   async function process(id: string) {
+    if (apiKey === null) return;
     try {
       const job = await api.process(apiKey, id);
       setJobs((items) => [job, ...items]);
@@ -414,6 +478,7 @@ export default function App() {
   }
 
   async function remove(id: string) {
+    if (apiKey === null) return;
     if (!window.confirm('Delete this media and its indexed evidence?')) return;
     try {
       await api.remove(apiKey, id);
@@ -426,13 +491,14 @@ export default function App() {
 
   function disconnect() {
     sessionStorage.removeItem('mediachain_api_key');
-    setApiKey('');
+    setApiKey(null);
     setConfig(null);
     setAssets([]);
     setJobs([]);
   }
 
-  if (!apiKey || !config) return <Connect onConnect={(key, next) => { setApiKey(key); setConfig(next); }} />;
+  if (initializing) return <main className="connect-page"><LoaderCircle className="spin" aria-label="Connecting" /></main>;
+  if (apiKey === null || !config) return <Connect onConnect={(key, next) => { setApiKey(key); setConfig(next); }} />;
 
   return (
     <div className="app-shell">
@@ -444,15 +510,15 @@ export default function App() {
         </nav>
         <div className="sidebar-foot">
           <div className="connection"><i /><div><span>Connected</span><small>{config.owner}</small></div></div>
-          <button className="logout" onClick={disconnect}><LogOut size={17} /> Disconnect</button>
+          {config.authentication_required && <button className="logout" onClick={disconnect}><LogOut size={17} /> Disconnect</button>}
         </div>
       </aside>
-      <div className="mobile-bar"><div className="wordmark"><div className="brand-mark small"><span /></div><strong>MediaChain</strong></div><button className="icon-button" onClick={disconnect}><LogOut size={18} /></button></div>
+      <div className="mobile-bar"><div className="wordmark"><div className="brand-mark small"><span /></div><strong>MediaChain</strong></div>{config.authentication_required && <button className="icon-button" onClick={disconnect}><LogOut size={18} /></button>}</div>
       <main className="workspace">
         {error && <ErrorNotice message={error} onClose={() => setError('')} />}
         {view === 'library' ? (
-          <MediaLibrary assets={assets} jobs={jobs} config={config} uploading={uploading} onUpload={upload} onProcess={process} onDelete={remove} />
-        ) : <AskWorkspace assets={assets} jobs={jobs} apiKey={apiKey} />}
+          <MediaLibrary assets={assets} jobs={jobs} config={config} uploading={uploading} onUpload={upload} onUrlUpload={uploadUrl} onProcess={process} onDelete={remove} />
+        ) : <AskWorkspace assets={assets} jobs={jobs} apiKey={apiKey} agentAvailable={config.agent_available} />}
       </main>
       <nav className="mobile-nav"><button className={view === 'library' ? 'active' : ''} onClick={() => setView('library')}><Library size={19} />Library</button><button className={view === 'ask' ? 'active' : ''} onClick={() => setView('ask')}><MessageSquareText size={19} />Ask</button></nav>
     </div>

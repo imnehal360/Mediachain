@@ -47,6 +47,12 @@ class VideoProcessor:
             "window": self.config.frame_window,
         }
 
+    def _sampler_for(self, asset: MediaAsset) -> FrameSampler:
+        if type(self.sampler) is not IntervalSampler or asset.duration is None:
+            return self.sampler
+        interval = max(self.sampler.interval, asset.duration / self.sampler.max_frames)
+        return IntervalSampler(interval, self.sampler.max_frames)
+
     async def process(self, asset: MediaAsset, context: ExecutionContext) -> ProcessingResult:
         asset = await probe(asset)
         warnings: list[str] = []
@@ -65,7 +71,8 @@ class VideoProcessor:
 
             async def visual() -> list[Document]:
                 docs = []
-                async for path, timestamp in self.sampler.sample(Path(asset.source), directory):
+                sampler = self._sampler_for(asset)
+                async for path, timestamp in sampler.sample(Path(asset.source), directory):
                     timestamp = max(
                         0.0, timestamp - float(asset.metadata.get("timeline_origin", 0))
                     )
@@ -89,6 +96,7 @@ class VideoProcessor:
                             end_time=end,
                             metadata={
                                 "sample_time": timestamp,
+                                "sampling": sampler.fingerprint(),
                                 "processing": self.fingerprint(),
                                 "observation_window": True,
                             },

@@ -26,7 +26,10 @@ class Model:
         self.actions = iter(actions)
 
     async def generate(self, messages):
-        return ChatOutput(content=json.dumps(next(self.actions)), token_usage=5)
+        action = next(self.actions)
+        return ChatOutput(
+            content=action if isinstance(action, str) else json.dumps(action), token_usage=5
+        )
 
 
 async def test_agent_tools_and_budgets():
@@ -45,6 +48,54 @@ async def test_agent_tools_and_budgets():
         )
     with pytest.raises(BudgetExceeded):
         await Agent(Model([{"answer": "hello"}]), [], AgentLimits(max_tokens=1)).run("q")
+
+
+async def test_agent_detailed_run_tracks_tools_and_accepts_fenced_json():
+    tool = Tool()
+    run = await Agent(
+        Model(
+            [
+                '```json\n{"tool":"search_text","arguments":{"query":"hello"}}\n```',
+                {
+                    "answer": "Grounded answer",
+                    "citation_ids": ["doc-1"],
+                    "insufficient_evidence": False,
+                },
+            ]
+        ),
+        [tool],
+    ).run_detailed("question")
+    assert run.answer == "Grounded answer"
+    assert run.citation_ids == ["doc-1"]
+    assert run.steps[0].tool == "search_text"
+    assert run.steps[0].arguments == {"query": "hello"}
+    assert run.token_usage == 10
+
+
+def test_agent_parser_uses_first_complete_json_action():
+    action = Agent._parse_action(
+        '{"tool":"search_text","arguments":{"query":"hello"}}\n'
+        '{"answer":"placeholder","citation_ids":["invented"]}'
+    )
+    assert action.tool == "search_text"
+    assert action.answer is None
+
+
+async def test_agent_repairs_a_malformed_model_action():
+    run = await Agent(
+        Model(
+            [
+                "I found the answer but forgot the required schema.",
+                {
+                    "answer": "No evidence was available.",
+                    "insufficient_evidence": True,
+                },
+            ]
+        ),
+        [],
+    ).run_detailed("question")
+    assert run.answer == "No evidence was available."
+    assert run.insufficient_evidence is True
 
 
 def test_registry():

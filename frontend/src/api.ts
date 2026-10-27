@@ -13,7 +13,7 @@ export class ApiError extends Error {
 
 async function request<T>(path: string, apiKey: string, init?: RequestInit): Promise<T> {
   const headers = new Headers(init?.headers);
-  headers.set('Authorization', `Bearer ${apiKey}`);
+  if (apiKey) headers.set('Authorization', `Bearer ${apiKey}`);
   if (init?.body && !(init.body instanceof FormData)) headers.set('Content-Type', 'application/json');
 
   const response = await fetch(`${baseUrl}${path}`, { ...init, headers });
@@ -40,6 +40,11 @@ export const api = {
     body.append('file', file);
     return request<MediaAsset>('/api/v1/media', key, { method: 'POST', body });
   },
+  uploadUrl: (key: string, url: string) =>
+    request<MediaAsset>('/api/v1/media/url', key, {
+      method: 'POST',
+      body: JSON.stringify({ url }),
+    }),
   process: (key: string, mediaId: string) =>
     request<Job>(`/api/v1/media/${mediaId}/process`, key, { method: 'POST' }),
   remove: (key: string, mediaId: string) =>
@@ -49,14 +54,21 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ question, media_ids: mediaIds.length ? mediaIds : null }),
     }),
+  agent: (key: string, question: string, mediaIds: string[]) =>
+    request<ModelResponse>('/api/v1/agent/query', key, {
+      method: 'POST',
+      body: JSON.stringify({ question, media_ids: mediaIds.length ? mediaIds : null }),
+    }),
   summarize: (key: string, mediaIds: string[], focus?: string) =>
     request<ModelResponse>('/api/v1/summarize', key, {
       method: 'POST',
       body: JSON.stringify({ media_ids: mediaIds.length ? mediaIds : null, focus: focus || null }),
     }),
   content: async (key: string, mediaId: string) => {
+    const headers = new Headers();
+    if (key) headers.set('Authorization', `Bearer ${key}`);
     const response = await fetch(`${baseUrl}/api/v1/media/${mediaId}/content`, {
-      headers: { Authorization: `Bearer ${key}` },
+      headers,
     });
     if (!response.ok) throw new ApiError('Could not load source media', response.status);
     return response.blob();

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import ipaddress
 import json
 import logging
 import secrets
@@ -22,9 +23,20 @@ from pydantic import Field
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
-from mediachain.core.errors import MediaChainError
-from mediachain.core.models import Document, Job, MediaAsset, Model, ModelResponse, RetrievalFilter
+from mediachain.agents import Agent, AgentLimits, AgentRun, media_tools
+from mediachain.core.errors import BudgetExceeded, GroundingError, MediaChainError
+from mediachain.core.models import (
+    Document,
+    ExecutionContext,
+    Job,
+    MediaAsset,
+    Model,
+    ModelResponse,
+    RetrievalFilter,
+    SourceReference,
+)
 from mediachain.loaders.local import FORMATS
+from mediachain.loaders.youtube import DownloadedMedia, download_youtube
 from mediachain.runtime.client import MediaChain
 from mediachain.runtime.jobs import JobQueue, LocalJobQueue, asset_lease
 
@@ -43,6 +55,84 @@ class SummaryRequest(Model):
     filters: RetrievalFilter | None = None
     focus: str | None = Field(default=None, max_length=10000)
     include_sources: bool = True
+
+
+class AgentQueryRequest(Model):
+    question: str = Field(min_length=1, max_length=10000)
+    media_ids: list[str] | None = None
+    include_sources: bool = True
+
+
+class URLUploadRequest(Model):
+    url: str = Field(min_length=1, max_length=2048)
+
+
+YouTubeDownload = Callable[[str, Path, int, float], Awaitable[DownloadedMedia]]
+
+
+def agent_sources(run: AgentRun) -> list[SourceReference]:
+    observed: dict[str, SourceReference] = {}
+    observed_order: list[str] = []
+
+    def remember(reference: SourceReference) -> None:
+        if reference.document_id not in observed:
+            observed_order.append(reference.document_id)
+        observed[reference.document_id] = reference
+
+    for step in run.steps:
+        observation = step.observation
+        records = observation if isinstance(observation, list) else []
+        if isinstance(observation, dict):
+            for source in observation.get("sources", []):
+                reference = SourceReference.model_validate(source)
+                remember(reference)
+        for item in records:
+            if not isinstance(item, dict):
+                continue
+            document = item.get("document", item)
+            if not isinstance(document, dict) or not {
+                "id",
+                "asset_id",
+                "source",
+                "modality",
+            }.issubset(document):
+                continue
+            reference = Document.model_validate(document).reference()
+            remember(reference)
+    citation_ids = []
+    for citation_id in dict.fromkeys(run.citation_ids):
+        normalized = citation_id
+        if citation_id not in observed and citation_id.isdigit():
+            position = int(citation_id) - 1
+            if 0 <= position < len(observed_order):
+                normalized = observed_order[position]
+        citation_ids.append(normalized)
+    if any(citation_id not in observed for citation_id in citation_ids):
+        raise GroundingError("Agent cited an identifier absent from tool observations")
+    if not run.insufficient_evidence and not citation_ids:
+        raise GroundingError("A supported agent answer must cite tool evidence")
+    return [observed[citation_id] for citation_id in citation_ids]
+
+
+def agent_fallback(
+    response: ModelResponse,
+    *,
+    tool_calls: list[dict[str, Any]],
+    agent_tokens: int = 0,
+    limit_reached: bool = False,
+) -> ModelResponse:
+    return response.model_copy(
+        update={
+            "token_usage": agent_tokens + (response.token_usage or 0),
+            "metadata": {
+                **response.metadata,
+                "mode": "agentic",
+                "tool_calls": tool_calls,
+                "grounding_fallback": True,
+                "agent_limit_reached": limit_reached,
+            },
+        }
+    )
 
 
 class BodyTooLarge(HTTPException):
@@ -82,20 +172,27 @@ def create_app(
     *,
     api_keys: dict[str, str] | None = None,
     development_owner: str | None = None,
+    development_local_only: bool = False,
     queue: JobQueue | None = None,
     max_upload_bytes: int = 100 * 1024 * 1024,
+    max_remote_bytes: int = 500 * 1024 * 1024,
+    max_remote_duration_seconds: float = 4 * 60 * 60,
+    youtube_download: YouTubeDownload | None = download_youtube,
     redis: Any = None,
     frontend_dir: str | Path | None = None,
     readiness: Callable[[], Awaitable[bool]] | None = None,
     allowed_origins: list[str] | None = None,
     trusted_hosts: list[str] | None = None,
     rate_limit_per_minute: int = 120,
+    agent_limits: AgentLimits | None = None,
 ) -> FastAPI:
-    """Map bearer API keys to owner IDs. No unauthenticated default is provided."""
+    """Map bearer API keys to owners, with explicit local-only development access."""
     if not api_keys and development_owner is None:
         raise ValueError("Configure API keys or explicitly opt into development_owner")
     if (
         max_upload_bytes <= 0
+        or max_remote_bytes <= 0
+        or max_remote_duration_seconds <= 0
         or rate_limit_per_minute < 0
         or (api_keys and any(not key or not owner for key, owner in api_keys.items()))
     ):
@@ -186,6 +283,14 @@ def create_app(
                         )
                 return value
         if development_owner is not None and not api_keys:
+            if development_local_only:
+                client_host = request.client.host if request.client else ""
+                try:
+                    is_loopback = ipaddress.ip_address(client_host).is_loopback
+                except ValueError:
+                    is_loopback = client_host.lower() == "localhost"
+                if not is_loopback:
+                    raise HTTPException(403, "Local access only")
             return development_owner
         raise HTTPException(401, "Valid bearer credentials required")
 
@@ -199,11 +304,16 @@ def create_app(
     async def configuration(owner_id: str = Depends(owner)) -> dict[str, Any]:
         return {
             "owner": owner_id,
+            "authentication_required": bool(api_keys),
             "max_upload_bytes": max_upload_bytes,
+            "max_remote_bytes": max_remote_bytes,
+            "max_remote_duration_seconds": max_remote_duration_seconds,
+            "youtube_url_enabled": youtube_download is not None,
             "formats": [
                 suffix for suffix, modality in FORMATS.items() if modality in chain.processors
             ],
             "answer_mode": "generative" if chain.rag.llm else "extractive",
+            "agent_available": chain.rag.llm is not None,
         }
 
     @app.get("/api/v1/media", response_model=list[MediaAsset])
@@ -332,6 +442,34 @@ def create_app(
             await chain.metadata.put_asset(loaded)
             return loaded
 
+    @app.post("/api/v1/media/url", response_model=MediaAsset, status_code=201)
+    async def upload_url(body: URLUploadRequest, owner_id: str = Depends(owner)) -> MediaAsset:
+        if youtube_download is None:
+            raise HTTPException(503, "YouTube imports are not configured")
+        with TemporaryDirectory(prefix="mediachain-youtube-") as temp:
+            downloaded = await youtube_download(
+                body.url,
+                Path(temp),
+                max_remote_bytes,
+                max_remote_duration_seconds,
+            )
+            if downloaded.path.suffix.lower() not in {".mp4", ".mov", ".mkv", ".webm"}:
+                raise HTTPException(415, "YouTube did not provide a supported video")
+            loaded = await chain.load(str(downloaded.path), owner_id)
+            loaded = loaded.model_copy(
+                update={
+                    "duration": downloaded.duration,
+                    "metadata": {
+                        **loaded.metadata,
+                        "original_name": downloaded.title + downloaded.path.suffix.lower(),
+                        "remote_url": downloaded.webpage_url,
+                        "remote_provider": "youtube",
+                    },
+                }
+            )
+            await chain.metadata.put_asset(loaded)
+            return loaded
+
     @app.get("/api/v1/media/{media_id}", response_model=MediaAsset)
     async def get_media(media_id: str, owner_id: str = Depends(owner)) -> MediaAsset:
         return await owned(media_id, owner_id)
@@ -371,6 +509,64 @@ def create_app(
             owner_id=owner_id,
             filters=body.filters,
             focus=body.focus,
+        )
+        return response if body.include_sources else response.model_copy(update={"sources": []})
+
+    @app.post("/api/v1/agent/query", response_model=ModelResponse)
+    async def agent_query(body: AgentQueryRequest, owner_id: str = Depends(owner)) -> ModelResponse:
+        if chain.rag.llm is None:
+            raise HTTPException(503, "Agent analysis requires a chat model")
+        if body.media_ids is not None:
+            for media_id in body.media_ids:
+                await owned(media_id, owner_id)
+        context = ExecutionContext(owner_id=owner_id)
+        agent = Agent(
+            chain.rag.llm,
+            media_tools(chain, owner_id, media_ids=body.media_ids),
+            agent_limits,
+        )
+        try:
+            run = await agent.run_detailed(body.question, context)
+        except (BudgetExceeded, TimeoutError):
+            grounded = await chain.ask(
+                body.question,
+                body.media_ids,
+                owner_id=owner_id,
+                context=context,
+            )
+            response = agent_fallback(grounded, tool_calls=[], limit_reached=True)
+            return response if body.include_sources else response.model_copy(update={"sources": []})
+        tool_calls = []
+        for step in run.steps:
+            result_count = len(step.observation) if isinstance(step.observation, list) else 1
+            if isinstance(step.observation, dict) and isinstance(
+                step.observation.get("sources"), list
+            ):
+                result_count = len(step.observation["sources"])
+            tool_calls.append(
+                {
+                    "tool": step.tool,
+                    "arguments": step.arguments,
+                    "result_count": result_count,
+                }
+            )
+        try:
+            sources = agent_sources(run)
+        except GroundingError:
+            grounded = await chain.ask(
+                body.question,
+                body.media_ids,
+                owner_id=owner_id,
+                context=context,
+            )
+            response = agent_fallback(grounded, tool_calls=tool_calls, agent_tokens=run.token_usage)
+            return response if body.include_sources else response.model_copy(update={"sources": []})
+        response = ModelResponse(
+            answer=run.answer,
+            sources=sources,
+            insufficient_evidence=run.insufficient_evidence,
+            token_usage=run.token_usage,
+            metadata={"mode": "agentic", "tool_calls": tool_calls},
         )
         return response if body.include_sources else response.model_copy(update={"sources": []})
 

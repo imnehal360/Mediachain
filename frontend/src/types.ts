@@ -36,9 +36,20 @@ export interface ModelResponse {
   metadata: Record<string, unknown>;
 }
 
+export interface AgentToolCall {
+  tool: string;
+  arguments: Record<string, unknown>;
+  result_count: number;
+}
+
 export interface WorkspaceConfig {
   owner: string;
+  authentication_required: boolean;
+  agent_available: boolean;
   max_upload_bytes: number;
+  max_remote_bytes: number;
+  max_remote_duration_seconds: number;
+  youtube_url_enabled: boolean;
   formats: string[];
   answer_mode: 'generative' | 'extractive';
 }

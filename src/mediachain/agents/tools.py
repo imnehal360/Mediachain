@@ -17,15 +17,32 @@ class SearchArguments(Model):
     media_ids: list[str] | None = None
     start_time: float | None = Field(default=None, ge=0)
     end_time: float | None = Field(default=None, ge=0)
-    limit: int = Field(default=8, ge=1, le=50)
+    limit: int = Field(default=5, ge=1, le=50)
 
 
 class MediaTool:
-    def __init__(self, name: str, chain: MediaChain, owner_id: str, output_dir: Path | None = None):
+    def __init__(
+        self,
+        name: str,
+        chain: MediaChain,
+        owner_id: str,
+        output_dir: Path | None = None,
+        media_ids: list[str] | None = None,
+    ):
         self.name, self.chain, self.owner_id, self.output_dir = name, chain, owner_id, output_dir
+        self.media_ids = set(media_ids) if media_ids is not None else None
+        purpose = {
+            "search_text": "Search indexed text, documents and PDFs",
+            "search_audio": "Search speech transcripts from audio or video",
+            "search_video": "Search visual descriptions from video frames",
+            "search_timeline": "Search all evidence around timestamps",
+            "get_transcript": "Read transcript segments in chronological order",
+            "summarize_media": "Generate a grounded summary of the selected media",
+            "extract_frame": "Extract one video frame at a timestamp",
+        }[name]
         self.description = (
-            name + ": arguments {query: string, media_ids: string[], start_time?: seconds, "
-            "end_time?: seconds, limit?: 1..50}. extract_frame requires one media_id and equal time boundaries."
+            purpose + ". Arguments: {query: string, media_ids?: string[], start_time?: seconds, "
+            "end_time?: seconds, limit?: 1..50}. Omit media_ids to use the allowed selection."
         )
 
     async def invoke(self, arguments: dict[str, Any], context: ExecutionContext) -> Any:
@@ -34,6 +51,8 @@ class MediaTool:
         args = SearchArguments.model_validate(arguments)
         assets = await self.chain.metadata.list_assets(self.owner_id)
         allowed = {a.id: a for a in assets}
+        if self.media_ids is not None:
+            allowed = {key: asset for key, asset in allowed.items() if key in self.media_ids}
         selected = args.media_ids if args.media_ids is not None else list(allowed)
         if any(i not in allowed for i in selected):
             raise KeyError("Unknown media")
@@ -86,7 +105,10 @@ class MediaTool:
 
 
 def media_tools(
-    chain: MediaChain, owner_id: str = "local", output_dir: Path | None = None
+    chain: MediaChain,
+    owner_id: str = "local",
+    output_dir: Path | None = None,
+    media_ids: list[str] | None = None,
 ) -> list[MediaTool]:
     names = [
         "search_text",
@@ -98,4 +120,4 @@ def media_tools(
     ]
     if output_dir is not None:
         names.append("extract_frame")
-    return [MediaTool(name, chain, owner_id, output_dir) for name in names]
+    return [MediaTool(name, chain, owner_id, output_dir, media_ids) for name in names]

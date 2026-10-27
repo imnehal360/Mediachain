@@ -13,6 +13,10 @@ class UnsupportedMediaError(MediaChainError):
     code = "unsupported_media"
 
 
+class RemoteMediaError(MediaChainError):
+    code = "remote_media_error"
+
+
 class ProcessingError(MediaChainError):
     code = "processing_error"
 

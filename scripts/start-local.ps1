@@ -74,11 +74,16 @@ catch {
     if (-not $ready) { throw "Ollama did not become ready." }
 }
 
-$keyMap = $env:MEDIACHAIN_API_KEYS | ConvertFrom-Json
-$workspaceKey = $keyMap.PSObject.Properties | Select-Object -First 1 -ExpandProperty Name
-
 Write-Host "Mediachain will be available at http://127.0.0.1:8000"
-Write-Host "Workspace key: $workspaceKey"
+$authenticationDisabled = $env:MEDIACHAIN_DISABLE_AUTH -in @("1", "true", "yes")
+if ($authenticationDisabled) {
+    Write-Host "Local authentication is disabled."
+}
+else {
+    $keyMap = $env:MEDIACHAIN_API_KEYS | ConvertFrom-Json
+    $workspaceKey = $keyMap.PSObject.Properties | Select-Object -First 1 -ExpandProperty Name
+    Write-Host "Workspace key: $workspaceKey"
+}
 Write-Host "Press Ctrl+C to stop the server."
 
 $arguments = @(

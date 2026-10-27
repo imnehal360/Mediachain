@@ -7,7 +7,9 @@ import json
 import os
 from typing import Any
 
+from mediachain.agents import AgentLimits
 from mediachain.api.app import create_app
+from mediachain.core.config import ProcessingConfig
 from mediachain.models.providers import (
     FasterWhisperSpeech,
     HTTPChatModel,
@@ -35,9 +37,15 @@ from mediachain.storage.s3 import S3ObjectStore
 HOSTED_SETTINGS = ("DATABASE_URL", "REDIS_URL", "QDRANT_URL", "S3_BUCKET")
 
 
+def enabled(name: str) -> bool:
+    return os.environ.get(name, "").lower() in {"1", "true", "yes"}
+
+
 def validate_server_config() -> None:
-    if os.environ.get("MEDIACHAIN_REQUIRE_HOSTED_SERVICES", "").lower() not in {"1", "true", "yes"}:
+    if not enabled("MEDIACHAIN_REQUIRE_HOSTED_SERVICES"):
         return
+    if enabled("MEDIACHAIN_DISABLE_AUTH"):
+        raise ValueError("MEDIACHAIN_DISABLE_AUTH cannot be used with hosted services")
     missing = [name for name in HOSTED_SETTINGS if not os.environ.get(name)]
     if missing:
         raise ValueError("Missing required hosted settings: " + ", ".join(missing))
@@ -70,7 +78,7 @@ def validate_server_config() -> None:
         os.environ.get("OCR_BASE_URL") or os.environ.get("MODEL_BASE_URL")
     ):
         model_errors.append("OCR_BASE_URL")
-    verify = os.environ.get("VERIFY_GROUNDED_ANSWERS", "").lower() in {"1", "true", "yes"}
+    verify = enabled("VERIFY_GROUNDED_ANSWERS")
     if verify and not (os.environ.get("VERIFIER_MODEL") or os.environ.get("CHAT_MODEL")):
         model_errors.append("VERIFIER_MODEL")
     if verify and not (os.environ.get("VERIFIER_BASE_URL") or os.environ.get("MODEL_BASE_URL")):
@@ -86,7 +94,13 @@ def csv_setting(name: str) -> list[str]:
 async def build_chain() -> MediaChain:
     validate_server_config()
     data_dir = os.environ.get("MEDIACHAIN_DATA_DIR", ".mediachain")
-    kwargs: dict[str, Any] = {"data_dir": data_dir}
+    kwargs: dict[str, Any] = {
+        "data_dir": data_dir,
+        "config": ProcessingConfig(
+            frame_interval=float(os.environ.get("MEDIACHAIN_FRAME_INTERVAL", "5")),
+            max_frames=int(os.environ.get("MEDIACHAIN_MAX_FRAMES", "1000")),
+        ),
+    }
     if bucket := os.environ.get("S3_BUCKET"):
         kwargs["object_store"] = S3ObjectStore(
             bucket,
@@ -225,7 +239,17 @@ class Server:
                     queue = ARQJobQueue(chain, redis)
                 self.app = create_app(
                     chain,
-                    api_keys=json.loads(os.environ.get("MEDIACHAIN_API_KEYS", "{}")),
+                    api_keys=(
+                        None
+                        if enabled("MEDIACHAIN_DISABLE_AUTH")
+                        else json.loads(os.environ.get("MEDIACHAIN_API_KEYS", "{}"))
+                    ),
+                    development_owner=(
+                        os.environ.get("MEDIACHAIN_LOCAL_OWNER", "local-user")
+                        if enabled("MEDIACHAIN_DISABLE_AUTH")
+                        else None
+                    ),
+                    development_local_only=enabled("MEDIACHAIN_DISABLE_AUTH"),
                     queue=queue,
                     redis=redis,
                     frontend_dir=os.environ.get("MEDIACHAIN_FRONTEND_DIR", "frontend/dist"),
@@ -234,6 +258,21 @@ class Server:
                     trusted_hosts=csv_setting("MEDIACHAIN_TRUSTED_HOSTS"),
                     rate_limit_per_minute=int(
                         os.environ.get("MEDIACHAIN_RATE_LIMIT_PER_MINUTE", "120")
+                    ),
+                    max_remote_bytes=int(
+                        os.environ.get("MEDIACHAIN_REMOTE_MAX_BYTES", "524288000")
+                    ),
+                    max_remote_duration_seconds=float(
+                        os.environ.get("MEDIACHAIN_REMOTE_MAX_DURATION_SECONDS", "14400")
+                    ),
+                    agent_limits=AgentLimits(
+                        max_steps=int(os.environ.get("MEDIACHAIN_AGENT_MAX_STEPS", "6")),
+                        max_tool_calls=int(os.environ.get("MEDIACHAIN_AGENT_MAX_TOOL_CALLS", "3")),
+                        timeout=float(os.environ.get("MEDIACHAIN_AGENT_TIMEOUT", "90")),
+                        max_tokens=int(os.environ.get("MEDIACHAIN_AGENT_MAX_TOKENS", "50000")),
+                        max_observation_chars=int(
+                            os.environ.get("MEDIACHAIN_AGENT_MAX_OBSERVATION_CHARS", "12000")
+                        ),
                     ),
                 )
                 await send({"type": "lifespan.startup.complete"})

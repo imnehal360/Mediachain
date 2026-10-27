@@ -110,6 +110,11 @@ def test_hosted_server_configuration_is_explicit(monkeypatch):
     with pytest.raises(ValueError, match="DATABASE_URL.*REDIS_URL.*QDRANT_URL.*S3_BUCKET"):
         validate_server_config()
 
+    monkeypatch.setenv("MEDIACHAIN_DISABLE_AUTH", "true")
+    with pytest.raises(ValueError, match="cannot be used with hosted services"):
+        validate_server_config()
+    monkeypatch.setenv("MEDIACHAIN_DISABLE_AUTH", "false")
+
     monkeypatch.setenv("DATABASE_URL", "postgresql://host/database")
     monkeypatch.setenv("REDIS_URL", "rediss://host/0")
     monkeypatch.setenv("QDRANT_URL", "https://qdrant.example")

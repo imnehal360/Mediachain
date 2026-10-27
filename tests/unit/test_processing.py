@@ -3,10 +3,33 @@ from pathlib import Path
 import pytest
 
 from mediachain.core.config import ProcessingConfig
-from mediachain.core.models import ExecutionContext, SpeechSegment
+from mediachain.core.models import ExecutionContext, MediaAsset, Modality, SpeechSegment
 from mediachain.loaders.local import LocalLoader
+from mediachain.modalities.video.sampling import IntervalSampler
 from mediachain.processors.audio import AudioProcessor
 from mediachain.processors.text import TextProcessor
+from mediachain.processors.video import VideoProcessor
+
+
+def test_video_sampling_adapts_to_long_media():
+    class Vision:
+        model_id, model_version = "vision", "1"
+
+    processor = VideoProcessor(
+        Vision(),
+        sampler=IntervalSampler(interval=5, max_frames=120),
+    )
+    asset = MediaAsset(
+        id="video",
+        source="video.mp4",
+        media_type=Modality.VIDEO,
+        content_hash="hash",
+        duration=4980,
+    )
+    sampler = processor._sampler_for(asset)
+    assert isinstance(sampler, IntervalSampler)
+    assert sampler.interval == pytest.approx(41.5)
+    assert sampler.max_frames == 120
 
 
 async def test_text_chunking(tmp_path):
