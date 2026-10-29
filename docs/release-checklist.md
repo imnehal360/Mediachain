@@ -1,6 +1,6 @@
 # Release checklist
 
-## Before the first public release
+## Before each release
 
 - Confirm the distribution name on PyPI and the public project name.
 - Add repository, documentation, and issue-tracker URLs to `pyproject.toml`.
@@ -8,7 +8,7 @@
 - Build the documentation with warnings treated as errors.
 - Run all tests, linting, formatting, and type checking.
 - Validate the wheel in a clean environment using the README quickstart.
-- Publish to TestPyPI and repeat the clean-install test.
+- Optionally publish a candidate to TestPyPI; verify the final published PyPI package in a clean environment.
 - Configure a PyPI Trusted Publisher for the `pypi` GitHub environment.
 - Create a GitHub release and tag matching `mediachain.__version__`.
 

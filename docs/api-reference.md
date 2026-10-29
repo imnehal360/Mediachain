@@ -63,3 +63,20 @@
 ::: mediachain.storage.S3ObjectStore
 
 ::: mediachain.processors.VisionPDFOCR
+
+## Agents
+
+::: mediachain.agents.Agent
+
+::: mediachain.agents.AgentLimits
+
+::: mediachain.agents.AgentRun
+
+::: mediachain.agents.media_tools
+
+## Application API
+
+The REST endpoint and persistent-conversation overview is in the
+[web application guide](web-application.md). The running server generates its request/response
+schemas at `/docs`. The Python `MediaChain.ask` API is stateless; conversation persistence and
+bounded follow-up context are provided by the conversation REST endpoints.

@@ -40,6 +40,8 @@ nav:
   - Home: index.md
   - Getting started: getting-started.md
   - Guides:
+      - Local models and media: local-media.md
+      - Web app, YouTube, agents, and chats: web-application.md
       - Architecture: ARCHITECTURE.md
       - Retrieval and grounding: retrieval-and-grounding.md
       - Extensions and plugins: EXTENDING.md
@@ -51,6 +53,7 @@ nav:
       - Engineering decisions: DECISIONS.md
       - Implementation plan: IMPLEMENTATION_PLAN.md
       - Release checklist: release-checklist.md
+      - PyPI publishing: PUBLISHING.md
 
 watch:
   - src/mediachain

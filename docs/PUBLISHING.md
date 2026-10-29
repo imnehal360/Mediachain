@@ -1,5 +1,9 @@
 # Publishing MediaChain to PyPI
 
+Version **0.1.0** was published on 29 October 2026. The steps below are release-maintenance
+instructions; existing maintainers should use the active project publisher rather than register
+a new pending publisher for an already-created project.
+
 MediaChain is packaged as `mediachain`; developers import `MediaChain` from `mediachain`.
 The base install requires Python 3.11+ and Pydantic. Optional extras install media, speech,
 embedding, API, and storage integrations. FFmpeg and Ollama remain separate system dependencies;
@@ -59,5 +63,7 @@ For optional functionality, install the relevant extras, for example:
 python -m pip install "mediachain[media,pdf,speech,embeddings,http,youtube]"
 ```
 
-The public project page is expected at <https://pypi.org/project/mediachain/> after a successful
-first publication. See the [official publishing guide](https://packaging.python.org/en/latest/guides/publishing-package-distribution-releases-using-github-actions-ci-cd-workflows/).
+The published project page is <https://pypi.org/project/mediachain/>.
+Documentation changes can be deployed from GitHub without a package release. The README shown
+on PyPI belongs to its uploaded distribution and is not updated by pushing README edits to GitHub;
+updated distribution documentation appears with a subsequent package version. See the [official publishing guide](https://packaging.python.org/en/latest/guides/publishing-package-distribution-releases-using-github-actions-ci-cd-workflows/).

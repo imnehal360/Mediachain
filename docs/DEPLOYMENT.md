@@ -1,5 +1,8 @@
 # Deployment
 
+For the published SDK quickstart, see [Getting started](getting-started.md). For the complete
+local Windows reference application, see [Web application](web-application.md).
+
 ## Local SDK
 
 Install Python 3.11+ and uv, then run `uv sync --dev`. Only Pydantic is required for the base package.
@@ -121,3 +124,10 @@ Provider documentation consulted during implementation:
 If Python cannot import `mediachain` after sync and the generated editable `.pth` file has a hidden
 filesystem flag, use `uv sync --no-editable` and `uv run --no-editable ...`. Python can ignore hidden
 `.pth` files. The final local validation used this regular installation; rerun sync after source edits.
+
+## Conversation storage in deployments
+
+The conversation API currently uses `conversations.sqlite` in the configured local data directory,
+even when media metadata uses hosted adapters. Persist and back up this directory if using chats.
+It is intended for the single-instance local app; do not assume shared chat storage or locking
+across hosted replicas.

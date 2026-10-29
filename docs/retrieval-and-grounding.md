@@ -35,3 +35,23 @@ review.
 
 When no chat model is configured, MediaChain returns an extractive evidence response. When no
 evidence matches, it returns an explicit insufficient-evidence result.
+
+## Local semantic embeddings versus the default baseline
+
+The base SDK uses 256-dimensional `HashEmbeddings`: deterministic lexical feature hashing,
+not a trained semantic model. Inject `SentenceTransformerEmbeddings` for MiniLM's native
+384-dimensional semantic vectors. The local application example does this explicitly.
+Changing only the dimensions setting does not change a model's output size; an incompatible
+size is rejected. Switching models requires compatible vectors to be regenerated.
+
+Text, transcript segments, and frame descriptions are all embedded as **text**. This release
+does not directly embed raw audio or video. Current text chunks use character boundaries;
+MiniLM's input length is bounded and long token sequences can be truncated. See the
+[model documentation](https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2).
+
+## Conversation context
+
+The SDK does not retain previous `ask` calls. The application conversation API stores successful
+turns and supplies bounded recent context to interpret follow-ups. It still performs retrieval;
+previous model answers are not authoritative source evidence. See
+[conversations](web-application.md#persistent-conversations).

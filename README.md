@@ -5,8 +5,8 @@ timestamped evidence. It provides a shared data model, replaceable model/storage
 hybrid retrieval, grounded RAG, workflows, bounded tool agents, and an optional authenticated API.
 
 Version 0.1.0 is an alpha developer preview. Public APIs may change before 1.0. See
-[validation](docs/VALIDATION.md) for what has actually been tested and
-[deployment limitations](docs/DEPLOYMENT.md) before operating a multi-user service.
+[validation](https://github.com/imnehal360/Mediachain/blob/main/docs/VALIDATION.md) for what has actually been tested and
+[deployment limitations](https://github.com/imnehal360/Mediachain/blob/main/docs/DEPLOYMENT.md) before operating a multi-user service.
 
 The authenticated API includes a responsive black-and-red web workspace for uploads, processing,
 grounded Q&A, summaries, citations, and timestamped audio/video evidence. Production Compose runs
@@ -15,18 +15,24 @@ configured as hosted services through environment variables.
 
 ## Install
 
-Once the first public release is available on PyPI:
+Install the published alpha release from [PyPI](https://pypi.org/project/mediachain/):
 
 ```bash
 pip install mediachain
 ```
 
-Until then, install from a local checkout:
+For development and the reference web application, use a repository checkout:
 
 ```bash
 uv sync --dev
 uv run python examples/text_qa.py notes.txt "What does this say about artificial intelligence?"
 ```
+
+The base SDK uses lexical-hash embeddings and returns retrieved evidence without generated prose.
+Install and configure model adapters for semantic embeddings, transcription, vision, and generated
+answers. The PyPI wheel does not include the React application or downloaded models.
+See the [quickstart](https://github.com/imnehal360/Mediachain/blob/main/docs/getting-started.md), [local media guide](https://github.com/imnehal360/Mediachain/blob/main/docs/local-media.md), and
+[web application guide](https://github.com/imnehal360/Mediachain/blob/main/docs/web-application.md).
 
 ### Complete local application on Windows
 
@@ -180,10 +186,10 @@ asset = await mc.add("https://media.example.com/interview.mp4")
 
 ## Reference applications
 
-- [Text QA](examples/text_qa.py): no external models required.
-- [Audio QA](examples/audio_qa.py): local Faster-Whisper transcription and timestamped retrieval.
-- [Interactive video QA](examples/video_qa.py): real speech, vision, embeddings and grounded generation.
-- [Synthetic fixture generator](examples/generate_fixture.py): original speech and a simple diagram,
+- [Text QA](https://github.com/imnehal360/Mediachain/blob/main/examples/text_qa.py): no external models required.
+- [Audio QA](https://github.com/imnehal360/Mediachain/blob/main/examples/audio_qa.py): local Faster-Whisper transcription and timestamped retrieval.
+- [Interactive video QA](https://github.com/imnehal360/Mediachain/blob/main/examples/video_qa.py): real speech, vision, embeddings and grounded generation.
+- [Synthetic fixture generator](https://github.com/imnehal360/Mediachain/blob/main/examples/generate_fixture.py): original speech and a simple diagram,
   using espeak or macOS `say`, Pillow and FFmpeg. No copyrighted third-party media is needed.
 
 ```bash
@@ -211,15 +217,15 @@ is entailed; applications needing stronger guarantees require an additional veri
 
 ## Extend and deploy
 
-- [Documentation home](docs/index.md) and [five-minute quickstart](docs/getting-started.md).
-- [Architecture](docs/ARCHITECTURE.md) and [engineering decisions](docs/DECISIONS.md).
-- [Interfaces, plugins, workflows and agents](docs/EXTENDING.md).
-- [Public API reference](docs/api-reference.md).
-- [API, Docker Compose and operations](docs/DEPLOYMENT.md).
-- [Implementation phases and acceptance record](docs/IMPLEMENTATION_PLAN.md).
-- [Executed checks and remaining validation](docs/VALIDATION.md).
+- [Documentation home](https://github.com/imnehal360/Mediachain/blob/main/docs/index.md) and [five-minute quickstart](https://github.com/imnehal360/Mediachain/blob/main/docs/getting-started.md).
+- [Architecture](https://github.com/imnehal360/Mediachain/blob/main/docs/ARCHITECTURE.md) and [engineering decisions](https://github.com/imnehal360/Mediachain/blob/main/docs/DECISIONS.md).
+- [Interfaces, plugins, workflows and agents](https://github.com/imnehal360/Mediachain/blob/main/docs/EXTENDING.md).
+- [Public API reference](https://github.com/imnehal360/Mediachain/blob/main/docs/api-reference.md).
+- [API, Docker Compose and operations](https://github.com/imnehal360/Mediachain/blob/main/docs/DEPLOYMENT.md).
+- [Implementation phases and acceptance record](https://github.com/imnehal360/Mediachain/blob/main/docs/IMPLEMENTATION_PLAN.md).
+- [Executed checks and remaining validation](https://github.com/imnehal360/Mediachain/blob/main/docs/VALIDATION.md).
 - [Contributing](CONTRIBUTING.md), [security policy](SECURITY.md), and
-  [changelog](CHANGELOG.md).
+  [changelog](https://github.com/imnehal360/Mediachain/blob/main/CHANGELOG.md).
 
 ```bash
 uv run pytest -q
