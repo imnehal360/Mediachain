@@ -64,6 +64,17 @@ async def test_delayed_audio_uses_original_timeline(tmp_path):
     assert 1.5 < docs[0].start_time < 1.7
     assert 3.1 < docs[0].end_time < 3.4
 
+    # A small budget exercises the same adaptive path used for long videos.
+    chain.config.max_frames = 3
+    from mediachain.processors.video import VideoProcessor
+
+    processor = VideoProcessor(Vision(), config=chain.config)
+    result = await processor.process(asset, ExecutionContext())
+    assert len(result.documents) == 3
+    assert result.documents[0].start_time == pytest.approx(0)
+    assert result.documents[-1].start_time > 2.5
+    assert all(d.metadata["sampling"]["interval"] > 1 for d in result.documents)
+
 
 async def test_scene_and_interval_sampling_and_limits(tmp_path):
     pytest.importorskip("av")

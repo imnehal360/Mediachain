@@ -6,6 +6,18 @@ $ErrorActionPreference = "Stop"
 $projectRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 Set-Location $projectRoot
 
+$portProbe = [System.Net.Sockets.TcpClient]::new()
+try {
+    $portProbe.Connect("127.0.0.1", 8000)
+    throw "Port 8000 is already in use. Stop the existing server with Ctrl+C in its terminal, then run this script again."
+}
+catch [System.Net.Sockets.SocketException] {
+    # Connection refused means there is no existing listener.
+}
+finally {
+    $portProbe.Dispose()
+}
+
 $machinePath = [Environment]::GetEnvironmentVariable("Path", "Machine")
 $userPath = [Environment]::GetEnvironmentVariable("Path", "User")
 $env:Path = "$machinePath;$userPath"
@@ -88,7 +100,13 @@ Write-Host "Press Ctrl+C to stop the server."
 
 $arguments = @(
     "-m", "uvicorn", "mediachain.runtime.server:app",
-    "--host", "127.0.0.1", "--port", "8000"
+    "--host", "127.0.0.1", "--port", "8000", "--workers", "1"
 )
-if (-not $NoReload) { $arguments += "--reload" }
+# Uvicorn's Windows reload loop cannot run asyncio subprocesses (FFmpeg/FFprobe).
+if (-not $NoReload -and [Environment]::OSVersion.Platform -ne [PlatformID]::Win32NT) {
+    $arguments += "--reload"
+}
+else {
+    Write-Host "Automatic reload is disabled; restart this script after code changes."
+}
 & $python @arguments

@@ -32,7 +32,7 @@ class AudioProcessor:
 
     def fingerprint(self) -> dict[str, Any]:
         return {
-            "processor": "audio-v2",
+            "processor": "audio-v3",
             "speech": [self.speech.model_id, self.speech.model_version],
             "diarization": [self.diarization.model_id, self.diarization.model_version]
             if self.diarization
@@ -47,7 +47,16 @@ class AudioProcessor:
                 segments = await self.speech.transcribe(audio_path)
             speakers = await self.diarization.diarize(audio_path) if self.diarization else []
         docs = []
+        offset = audio_offset(asset) if asset.streams else 0
         for segment in segments:
+            start = segment.start_time + offset
+            end = segment.end_time + offset
+            # Speech models can estimate an ending beyond the final audio sample.
+            # Keep citations on the original media timeline and drop out-of-range speech.
+            if asset.duration is not None:
+                if start >= asset.duration:
+                    continue
+                end = min(end, asset.duration)
             speaker = segment.speaker
             matches = [
                 (
@@ -86,8 +95,8 @@ class AudioProcessor:
                     source=asset.source,
                     modality=Modality.AUDIO,
                     content=segment.text,
-                    start_time=segment.start_time + (audio_offset(asset) if asset.streams else 0),
-                    end_time=segment.end_time + (audio_offset(asset) if asset.streams else 0),
+                    start_time=start,
+                    end_time=end,
                     metadata={"speaker": speaker, "processing": self.fingerprint()},
                     provenance=provenance,
                 )

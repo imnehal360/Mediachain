@@ -26,6 +26,7 @@ jobs:
           PACKAGE_VERSION=$(uv run python -c "import mediachain; print(mediachain.__version__)")
           test "${RELEASE_TAG#v}" = "$PACKAGE_VERSION"
       - run: uv build
+      - run: uvx twine check --strict dist/*
       - uses: actions/upload-artifact@v5
         with:
           name: python-package-distributions

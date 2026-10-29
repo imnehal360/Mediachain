@@ -40,7 +40,7 @@ class VideoProcessor:
 
     def fingerprint(self) -> dict[str, Any]:
         return {
-            "processor": "video-v2",
+            "processor": "video-v4",
             "vision": [self.vision.model_id, self.vision.model_version],
             "audio": self.audio.fingerprint() if self.audio else None,
             "sampler": self.sampler.fingerprint(),
@@ -76,6 +76,9 @@ class VideoProcessor:
                     timestamp = max(
                         0.0, timestamp - float(asset.metadata.get("timeline_origin", 0))
                     )
+                    if asset.duration is not None and timestamp >= asset.duration:
+                        await asyncio.to_thread(path.unlink)
+                        continue
                     async with asyncio.timeout(self.config.model_timeout):
                         with span(context, "model.vision"):
                             description = await self.vision.describe(

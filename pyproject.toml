@@ -79,5 +79,18 @@ files = ["src/mediachain"]
 [tool.hatch.build.targets.wheel]
 packages = ["src/mediachain"]
 
+[tool.hatch.build.targets.sdist]
+include = [
+    "/src/mediachain",
+    "/tests",
+    "/docs",
+    "/examples",
+    "/README.md",
+    "/LICENSE",
+    "/CHANGELOG.md",
+    "/pyproject.toml",
+    "/uv.lock",
+]
+
 [tool.hatch.build]
 exclude = [".venv", ".uv-cache", ".tools", ".mediachain", ".env", "dist", "site"]

@@ -115,3 +115,9 @@ button:disabled { opacity: .45; cursor: not-allowed; }
   .ask-grid { display: block; border: 0; background: transparent; }.source-picker { border: 1px solid var(--line); border-radius: 10px; margin-bottom: 12px; max-height: 230px; overflow-y: auto; }.answer-panel { border: 1px solid var(--line); border-radius: 10px; padding: 14px; }.answer-empty { min-height: 250px; }
   .mobile-nav { display: grid; grid-template-columns: 1fr 1fr; position: fixed; bottom: 0; left: 0; right: 0; height: 66px; background: rgba(12,12,12,.96); backdrop-filter: blur(12px); border-top: 1px solid #282828; z-index: 10; }.mobile-nav button { background: transparent; border: 0; color: #777; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; font-size: 10px; }.mobile-nav button.active { color: var(--red); }
 }
+
+.conversation-toolbar { display: flex; gap: 12px; margin: 20px 0; flex-wrap: wrap; }
+.conversation-toolbar select { background: #171717; color: #eee; border: 1px solid #353535; border-radius: 8px; padding: 10px; max-width: 100%; min-width: 0; }
+.chat-history { max-height: 65vh; overflow-y: auto; overflow-wrap: anywhere; }
+.chat-question { padding: 16px; margin-top: 20px; background: #202020; border-radius: 10px; white-space: pre-wrap; }
+.chat-question p { margin: 5px 0; }

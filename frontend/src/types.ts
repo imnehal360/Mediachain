@@ -42,6 +42,21 @@ export interface AgentToolCall {
   result_count: number;
 }
 
+export interface ConversationMessage {
+  role: 'user' | 'assistant';
+  content: string;
+  created_at: number;
+  response?: ModelResponse;
+}
+
+export interface Conversation {
+  id: string;
+  title: string;
+  media_ids: string[] | null;
+  updated_at: number;
+  messages: ConversationMessage[];
+}
+
 export interface WorkspaceConfig {
   owner: string;
   authentication_required: boolean;

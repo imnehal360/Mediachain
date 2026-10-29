@@ -52,12 +52,30 @@ video, and timeline tools before answering with validated citations. Agent runs 
 step, tool-call, token, observation, and timeout limits; an unsupported agent draft falls back to
 the standard grounded RAG path rather than being returned.
 
+Questions and answers are saved with citations in `.mediachain/conversations.sqlite` (or the
+configured data directory). Use **Saved conversations** to reopen a thread after refreshing or
+restarting, and **New chat** to start a separate thread. Quick answers, agent analysis, and summaries
+share the thread. Recent conversation context helps interpret follow-ups; factual answers still
+require retrieved media evidence. Conversations are scoped to the authenticated owner. In local
+no-auth mode, all users of that workspace share the same local owner and conversation history.
+
 To ingest a public YouTube video, paste one `youtube.com` or `youtu.be` video URL into the
 library's URL field. MediaChain downloads a bounded 480p copy with yt-dlp, stores it locally, and
 starts the same transcription and visual-analysis pipeline used for uploaded videos. Playlists,
 channels, live/upcoming streams, non-YouTube hosts, videos over 4 hours, and downloads over 500 MB
 are rejected by default. Only import media you own or have permission to process. YouTube changes
 frequently, so keep the locked yt-dlp dependency current when imports begin failing.
+
+The local configuration caps visual analysis at 120 frames, spreading samples across long
+videos while retaining five-second sampling for shorter clips. This can miss brief visual
+events; audio transcription still covers the full recording. `MEDIACHAIN_MAX_FRAMES` controls
+the frame budget and `MEDIACHAIN_SPEECH_TIMEOUT=7200` allows up to two hours for transcription,
+separate from individual vision-call timeouts. Long videos can still take substantial time.
+If startup reports port 8000 is occupied, stop the existing server before restarting so the
+browser uses the updated code.
+On Windows, the launcher runs one worker without automatic reload because Uvicorn's reload
+event loop cannot launch FFmpeg/FFprobe subprocesses. Restart the script after code changes;
+do not add `--reload` to a manual Windows Uvicorn command.
 
 If macOS ignores uv's generated editable `.pth` file because it has a hidden filesystem flag, use
 `uv sync --no-editable --dev`. The test suite also adds `src` to its import path explicitly.

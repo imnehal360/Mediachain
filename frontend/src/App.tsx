@@ -22,7 +22,7 @@ import {
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { ApiError, api } from './api';
-import type { AgentToolCall, Job, MediaAsset, ModelResponse, SourceReference, WorkspaceConfig } from './types';
+import type { AgentToolCall, Conversation, Job, MediaAsset, ModelResponse, SourceReference, WorkspaceConfig } from './types';
 
 type View = 'library' | 'ask';
 
@@ -234,10 +234,30 @@ function MediaLibrary({
   );
 }
 
-function AskWorkspace({ assets, jobs, apiKey, agentAvailable }: { assets: MediaAsset[]; jobs: Job[]; apiKey: string; agentAvailable: boolean }) {
-  const [selected, setSelected] = useState<string[]>([]);
+function AskWorkspace({ assets, jobs, apiKey, agentAvailable, focusedId, onRetry }: { assets: MediaAsset[]; jobs: Job[]; apiKey: string; agentAvailable: boolean; focusedId: string | null; onRetry: (id: string) => void }) {
+  const [selected, setSelected] = useState<string[]>(focusedId ? [focusedId] : []);
   const [question, setQuestion] = useState('');
   const [response, setResponse] = useState<ModelResponse | null>(null);
+  const [chat, setChat] = useState<Conversation | null>(null);
+  const [conversations, setConversations] = useState<Omit<Conversation, 'messages'>[]>([]);
+  const historyEnd = useRef<HTMLDivElement>(null);
+
+  async function openChat(id: string) {
+    if (busy) return;
+    try {
+      const saved = await api.conversation(apiKey, id);
+      setChat(saved);
+      setSelected(saved.media_ids || []);
+      setResponse(saved.messages.at(-1)?.response || null);
+      setActiveSource(null);
+    } catch (reason) { setError(reason instanceof Error ? reason.message : 'Could not open chat'); }
+  }
+
+  useEffect(() => {
+    api.conversations(apiKey).then(setConversations).catch(() => setError('Could not load saved conversations'));
+  }, [apiKey]);
+
+  useEffect(() => { historyEnd.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' }); }, [chat?.messages.length]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [activeSource, setActiveSource] = useState<SourceReference | null>(null);
@@ -255,24 +275,39 @@ function AskWorkspace({ assets, jobs, apiKey, agentAvailable }: { assets: MediaA
     );
   }, [jobs]);
   const readyAssets = assets.filter((asset) => readyIds.has(asset.id));
+  const waiting = selected.some((id) => !readyIds.has(id));
+  const canAsk = readyAssets.length > 0 && !waiting;
+  const pendingAssets = assets.filter((asset) => !readyIds.has(asset.id));
+
+  useEffect(() => {
+    setSelected(focusedId ? [focusedId] : []);
+    setResponse(null);
+    setChat(null);
+  }, [focusedId]);
+
+  useEffect(() => {
+    setSelected((items) => items.filter((id) => assets.some((asset) => asset.id === id)));
+  }, [assets]);
 
   function toggle(id: string) {
     setSelected((items) => items.includes(id) ? items.filter((item) => item !== id) : [...items, id]);
   }
 
   async function run(mode: 'ask' | 'summarize') {
+    if (!canAsk || busy) return;
     if (mode === 'ask' && !question.trim()) return;
     setBusy(true);
     setError('');
     setResponse(null);
     setActiveSource(null);
     try {
-      const result = mode === 'ask'
-        ? queryMode === 'agent'
-          ? await api.agent(apiKey, question.trim(), selected)
-          : await api.ask(apiKey, question.trim(), selected)
-        : await api.summarize(apiKey, selected, question.trim());
-      setResponse(result);
+      const activeChat = chat || await api.newConversation(apiKey, selected);
+      setChat(activeChat);
+      const updated = await api.sendMessage(apiKey, activeChat.id, question.trim() || 'Summarize the available evidence', selected, mode === 'summarize' ? 'summary' : queryMode);
+      setChat(updated);
+      setResponse(updated.messages.at(-1)?.response || null);
+      setQuestion('');
+      api.conversations(apiKey).then(setConversations).catch(() => undefined);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : 'The query failed');
     } finally {
@@ -281,7 +316,6 @@ function AskWorkspace({ assets, jobs, apiKey, agentAvailable }: { assets: MediaA
   }
 
   const sourceAsset = activeSource && assets.find((asset) => asset.id === activeSource.media_id);
-  const toolCalls = (response?.metadata.tool_calls as AgentToolCall[] | undefined) || [];
 
   useEffect(() => {
     if (!sourceAsset || sourceAsset.media_type === 'text') {
@@ -307,6 +341,24 @@ function AskWorkspace({ assets, jobs, apiKey, agentAvailable }: { assets: MediaA
         <div><p className="eyebrow">Grounded intelligence</p><h2>Ask your media</h2></div>
         <span className="mode-pill"><Sparkles size={14} /> {response ? `${response.sources.length} sources` : 'Evidence first'}</span>
       </header>
+      <div className="processing-updates" aria-live="polite">
+        {pendingAssets.map((asset) => {
+          const job = [...jobs].filter((item) => item.media_id === asset.id).sort((a, b) => b.created_at - a.created_at)[0];
+          const active = job?.status === 'queued' || job?.status === 'running';
+          return <div className="notice" key={asset.id}>
+            {active ? <LoaderCircle className="spin" size={18} /> : <AlertCircle size={18} />}
+            <span><strong>{displayName(asset)}</strong><br />{active ? 'Preparing your media for questions. Audio and video can take several minutes; keep the server running.' : 'This media is not ready. Try processing it again.'}{job?.error && <small> {job.error}</small>}</span>
+            {!active && <button className="secondary-button" onClick={() => onRetry(asset.id)}>Retry processing</button>}
+          </div>;
+        })}
+      </div>
+      <div className="conversation-toolbar">
+        <button className="secondary-button" disabled={busy} onClick={() => { setChat(null); setResponse(null); setQuestion(''); setActiveSource(null); }}>New chat</button>
+        <select aria-label="Saved conversations" disabled={busy} value={chat?.id || ''} onChange={(event) => { if (event.target.value) openChat(event.target.value); }}>
+          <option value="">Open a saved conversation</option>
+          {conversations.map((item) => <option key={item.id} value={item.id}>{item.title}</option>)}
+        </select>
+      </div>
       <div className="ask-grid">
         <aside className="source-picker">
           <div className="section-heading"><h3>Sources</h3><button onClick={() => setSelected(selected.length ? [] : readyAssets.map((a) => a.id))}>{selected.length ? 'Clear' : 'All'}</button></div>
@@ -329,21 +381,26 @@ function AskWorkspace({ assets, jobs, apiKey, agentAvailable }: { assets: MediaA
               <button className={queryMode === 'quick' ? 'active' : ''} onClick={() => setQueryMode('quick')}>Quick Answer</button>
               <button className={queryMode === 'agent' ? 'active' : ''} onClick={() => setQueryMode('agent')} disabled={!agentAvailable} title={agentAvailable ? 'Use multiple media tools' : 'A chat model is required'}>Agent Analysis</button>
             </div>
-            <textarea value={question} onChange={(event) => setQuestion(event.target.value)} placeholder="Ask a question, or enter a focus for the summary…" rows={3} />
+            <p className="picker-help" role="status">{waiting ? 'Your selected media is being prepared. You can type a question now and send it when ready.' : canAsk ? 'Ready to ask. Type a question about your media below.' : 'Upload a file or paste a YouTube link above to get started.'}</p>
+            <textarea value={question} maxLength={6000} onChange={(event) => setQuestion(event.target.value)} placeholder="Ask a question, or enter a focus for the summary…" rows={3} />
             <div className="question-actions">
-              <button className="secondary-button" onClick={() => run('summarize')} disabled={busy || readyAssets.length === 0}><Sparkles size={16} /> Summarize</button>
-              <button className="primary-button" onClick={() => run('ask')} disabled={busy || !question.trim() || readyAssets.length === 0}>
+              <button className="secondary-button" onClick={() => run('summarize')} disabled={busy || !canAsk}><Sparkles size={16} /> Summarize</button>
+              <button className="primary-button" onClick={() => run('ask')} disabled={busy || !question.trim() || !canAsk}>
                 {busy ? <LoaderCircle className="spin" size={17} /> : <MessageSquareText size={17} />} {queryMode === 'agent' ? 'Analyze' : 'Ask'}
               </button>
             </div>
           </div>
           {error && <ErrorNotice message={error} onClose={() => setError('')} />}
-          {!response && !busy && (
+          {!chat?.messages.length && !busy && (
             <div className="answer-empty"><div><span /><span /><span /></div><h3>Answers anchored to evidence</h3><p>Every response points back to the exact source and moment.</p></div>
           )}
           {busy && <div className="answer-empty"><LoaderCircle className="spin" /><h3>{queryMode === 'agent' ? 'Agent is investigating your media…' : 'Searching your evidence…'}</h3></div>}
-          {response && (
-            <div className="response">
+          <div className="chat-history" role="log" aria-label="Conversation history">
+          {chat?.messages.map((message, index) => message.role === 'user' ? <div className="chat-question" key={index}><p className="eyebrow">You</p><p>{message.content}</p></div> : message.response ? (() => {
+            const response = message.response;
+            const toolCalls = (response.metadata.tool_calls as AgentToolCall[] | undefined) || [];
+            return (
+            <div className="response" key={index}>
               <p className="eyebrow">Answer</p>
               <div className="answer-text">{response.answer}</div>
               {toolCalls.length > 0 && (
@@ -367,7 +424,10 @@ function AskWorkspace({ assets, jobs, apiKey, agentAvailable }: { assets: MediaA
                 </div>
               )}
             </div>
-          )}
+          ); })() : null)}
+          {busy && <div className="chat-question"><p className="eyebrow">You</p><p>{question || 'Summarize the available evidence'}</p></div>}
+          <div ref={historyEnd} />
+          </div>
         </div>
       </div>
       {activeSource && sourceAsset && (
@@ -390,7 +450,8 @@ export default function App() {
   const [initializing, setInitializing] = useState(true);
   const [assets, setAssets] = useState<MediaAsset[]>([]);
   const [jobs, setJobs] = useState<Job[]>([]);
-  const [view, setView] = useState<View>('library');
+  const [view, setView] = useState<View>('ask');
+  const [focusedId, setFocusedId] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState('');
 
@@ -431,7 +492,7 @@ export default function App() {
 
   useEffect(() => {
     if (!jobs.some((job) => job.status === 'queued' || job.status === 'running')) return;
-    const timer = window.setInterval(() => refresh().catch(() => undefined), 1500);
+    const timer = window.setInterval(() => refresh().catch(() => undefined), 5000);
     return () => window.clearInterval(timer);
   }, [jobs, refresh]);
 
@@ -441,7 +502,9 @@ export default function App() {
     setError('');
     try {
       const asset = await api.upload(apiKey, file);
-      setAssets((items) => [asset, ...items]);
+      setAssets((items) => [asset, ...items.filter((item) => item.id !== asset.id)]);
+      setFocusedId(asset.id);
+      setView('ask');
       const job = await api.process(apiKey, asset.id);
       setJobs((items) => [job, ...items]);
     } catch (reason) {
@@ -457,7 +520,9 @@ export default function App() {
     setError('');
     try {
       const asset = await api.uploadUrl(apiKey, url);
-      setAssets((items) => [asset, ...items]);
+      setAssets((items) => [asset, ...items.filter((item) => item.id !== asset.id)]);
+      setFocusedId(asset.id);
+      setView('ask');
       const job = await api.process(apiKey, asset.id);
       setJobs((items) => [job, ...items]);
     } catch (reason) {
@@ -518,7 +583,11 @@ export default function App() {
         {error && <ErrorNotice message={error} onClose={() => setError('')} />}
         {view === 'library' ? (
           <MediaLibrary assets={assets} jobs={jobs} config={config} uploading={uploading} onUpload={upload} onUrlUpload={uploadUrl} onProcess={process} onDelete={remove} />
-        ) : <AskWorkspace assets={assets} jobs={jobs} apiKey={apiKey} agentAvailable={config.agent_available} />}
+        ) : <>
+          <div className="section-heading"><div><h2>Upload or paste a link. Then ask.</h2><p className="picker-help">1. Add media · 2. We prepare it automatically · 3. Ask questions with sources</p></div></div>
+          <UploadPanel config={config} busy={uploading} onUpload={upload} onUrlUpload={uploadUrl} />
+          <AskWorkspace assets={assets} jobs={jobs} apiKey={apiKey} agentAvailable={config.agent_available} focusedId={focusedId} onRetry={process} />
+        </>}
       </main>
       <nav className="mobile-nav"><button className={view === 'library' ? 'active' : ''} onClick={() => setView('library')}><Library size={19} />Library</button><button className={view === 'ask' ? 'active' : ''} onClick={() => setView('ask')}><MessageSquareText size={19} />Ask</button></nav>
     </div>

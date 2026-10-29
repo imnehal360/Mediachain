@@ -91,6 +91,7 @@ class MediaChain:
     ):
         self.config = config or ProcessingConfig()
         root = Path(data_dir)
+        self.data_dir = root
         local = (
             SQLiteStore(root / "metadata.sqlite")
             if document_store is None or metadata_store is None
@@ -110,7 +111,7 @@ class MediaChain:
             AudioProcessor(
                 speech,
                 diarization=diarization,
-                timeout=self.config.model_timeout,
+                timeout=self.config.speech_timeout or self.config.model_timeout,
             )
             if speech
             else None

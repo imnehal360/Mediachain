@@ -1,4 +1,4 @@
-import type { Job, MediaAsset, ModelResponse, WorkspaceConfig } from './types';
+import type { Conversation, Job, MediaAsset, ModelResponse, WorkspaceConfig } from './types';
 
 const baseUrl = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/$/, '');
 
@@ -32,6 +32,10 @@ async function request<T>(path: string, apiKey: string, init?: RequestInit): Pro
 }
 
 export const api = {
+  conversations: (key: string) => request<Omit<Conversation, 'messages'>[]>('/api/v1/conversations', key),
+  conversation: (key: string, id: string) => request<Conversation>(`/api/v1/conversations/${id}`, key),
+  newConversation: (key: string, mediaIds: string[]) => request<Conversation>('/api/v1/conversations', key, { method: 'POST', body: JSON.stringify({ media_ids: mediaIds.length ? mediaIds : null }) }),
+  sendMessage: (key: string, id: string, question: string, mediaIds: string[], mode: string) => request<Conversation>(`/api/v1/conversations/${id}/messages`, key, { method: 'POST', body: JSON.stringify({ question, media_ids: mediaIds.length ? mediaIds : null, mode }) }),
   config: (key: string) => request<WorkspaceConfig>('/api/v1/config', key),
   media: (key: string) => request<MediaAsset[]>('/api/v1/media?limit=500', key),
   jobs: (key: string) => request<Job[]>('/api/v1/jobs?limit=500', key),

@@ -15,6 +15,7 @@ class ProcessingConfig(Model):
     max_frames: int = Field(default=1000, gt=0)
     max_file_bytes: int = Field(default=1024 * 1024 * 1024, gt=0)
     model_timeout: float = Field(default=300, gt=0)
+    speech_timeout: float | None = Field(default=None, gt=0)
     max_ocr_pages: int = Field(default=200, gt=0)
 
     @model_validator(mode="after")

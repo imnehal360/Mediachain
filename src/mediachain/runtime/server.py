@@ -99,6 +99,11 @@ async def build_chain() -> MediaChain:
         "config": ProcessingConfig(
             frame_interval=float(os.environ.get("MEDIACHAIN_FRAME_INTERVAL", "5")),
             max_frames=int(os.environ.get("MEDIACHAIN_MAX_FRAMES", "1000")),
+            speech_timeout=(
+                float(os.environ["MEDIACHAIN_SPEECH_TIMEOUT"])
+                if os.environ.get("MEDIACHAIN_SPEECH_TIMEOUT")
+                else None
+            ),
         ),
     }
     if bucket := os.environ.get("S3_BUCKET"):

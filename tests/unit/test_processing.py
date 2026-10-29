@@ -3,12 +3,20 @@ from pathlib import Path
 import pytest
 
 from mediachain.core.config import ProcessingConfig
-from mediachain.core.models import ExecutionContext, MediaAsset, Modality, SpeechSegment
+from mediachain.core.models import (
+    ExecutionContext,
+    MediaAsset,
+    MediaStream,
+    Modality,
+    ProcessingResult,
+    SpeechSegment,
+)
 from mediachain.loaders.local import LocalLoader
 from mediachain.modalities.video.sampling import IntervalSampler
 from mediachain.processors.audio import AudioProcessor
 from mediachain.processors.text import TextProcessor
 from mediachain.processors.video import VideoProcessor
+from mediachain.runtime.client import MediaChain
 
 
 def test_video_sampling_adapts_to_long_media():
@@ -30,6 +38,26 @@ def test_video_sampling_adapts_to_long_media():
     assert isinstance(sampler, IntervalSampler)
     assert sampler.interval == pytest.approx(41.5)
     assert sampler.max_frames == 120
+
+
+@pytest.mark.parametrize("speech_timeout,expected", [(None, 300), (7200, 7200)])
+def test_speech_timeout_is_separate_from_vision(tmp_path, speech_timeout, expected):
+    class Speech:
+        model_id, model_version = "speech", "1"
+
+    class Vision:
+        model_id, model_version = "vision", "1"
+
+    chain = MediaChain(
+        data_dir=tmp_path,
+        speech=Speech(),
+        vision=Vision(),
+        config=ProcessingConfig(speech_timeout=speech_timeout),
+    )
+    assert chain.processors[Modality.AUDIO].timeout == expected
+    video = chain.processors[Modality.VIDEO]
+    assert video.audio.timeout == expected
+    assert video.config.model_timeout == 300
 
 
 async def test_text_chunking(tmp_path):
@@ -60,6 +88,36 @@ async def test_audio_provenance(tmp_path):
     assert docs[0].start_time == 120
     assert docs[0].provenance[0].model_id == "fake"
     assert docs[0].asset_id == asset.id
+
+
+@pytest.mark.parametrize("duration", [10.0, None])
+async def test_transcript_respects_duration_after_audio_offset(tmp_path, duration):
+    class Speech:
+        model_id, model_version = "speech", "1"
+
+        async def transcribe(self, audio_path):
+            return [
+                SpeechSegment(text="Final words", start_time=7, end_time=12),
+                SpeechSegment(text="Beyond the recording", start_time=9, end_time=13),
+            ]
+
+    asset = MediaAsset(
+        id="video",
+        source="video.mp4",
+        media_type=Modality.VIDEO,
+        content_hash="hash",
+        duration=duration,
+        metadata={"timeline_origin": 1},
+        streams=[MediaStream(index=1, modality=Modality.AUDIO, metadata={"start_time": 3})],
+    )
+    docs = await AudioProcessor(Speech()).transcribe(
+        asset, tmp_path / "audio.wav", ExecutionContext()
+    )
+    assert docs[0].start_time == 9
+    assert docs[0].end_time == (10 if duration is not None else 14)
+    assert len(docs) == (1 if duration is not None else 2)
+    assert docs[0].content == "Final words"
+    ProcessingResult(asset=asset, documents=docs)
 
 
 async def test_audio_assigns_overlapping_hosted_speaker(tmp_path):

@@ -39,6 +39,7 @@ from mediachain.loaders.local import FORMATS
 from mediachain.loaders.youtube import DownloadedMedia, download_youtube
 from mediachain.runtime.client import MediaChain
 from mediachain.runtime.jobs import JobQueue, LocalJobQueue, asset_lease
+from mediachain.storage.conversations import ConversationStore
 
 logger = logging.getLogger("mediachain.api")
 
@@ -65,6 +66,15 @@ class AgentQueryRequest(Model):
 
 class URLUploadRequest(Model):
     url: str = Field(min_length=1, max_length=2048)
+
+
+class ConversationRequest(Model):
+    media_ids: list[str] | None = None
+
+
+class ConversationTurn(ConversationRequest):
+    question: str = Field(min_length=1, max_length=6000)
+    mode: str = Field(default="quick", pattern="^(quick|agent|summary)$")
 
 
 YouTubeDownload = Callable[[str, Path, int, float], Awaitable[DownloadedMedia]]
@@ -198,6 +208,8 @@ def create_app(
     ):
         raise ValueError("Invalid upload limit or empty API key/owner")
     jobs = queue or LocalJobQueue(chain)
+    conversations = ConversationStore(chain.data_dir / "conversations.sqlite")
+    conversation_locks: dict[str, asyncio.Lock] = {}
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
@@ -569,6 +581,77 @@ def create_app(
             metadata={"mode": "agentic", "tool_calls": tool_calls},
         )
         return response if body.include_sources else response.model_copy(update={"sources": []})
+
+    @app.get("/api/v1/conversations")
+    async def list_conversations(owner_id: str = Depends(owner)) -> list[dict[str, Any]]:
+        return await conversations.list_chats(owner_id)
+
+    @app.post("/api/v1/conversations", status_code=201)
+    async def create_conversation(
+        body: ConversationRequest, owner_id: str = Depends(owner)
+    ) -> dict[str, Any]:
+        for media_id in body.media_ids or []:
+            await owned(media_id, owner_id)
+        return await conversations.create(owner_id, body.media_ids)
+
+    @app.get("/api/v1/conversations/{conversation_id}")
+    async def get_conversation(
+        conversation_id: str, owner_id: str = Depends(owner)
+    ) -> dict[str, Any]:
+        return await conversations.get(conversation_id, owner_id)
+
+    @app.post("/api/v1/conversations/{conversation_id}/messages")
+    async def conversation_turn(
+        conversation_id: str, body: ConversationTurn, owner_id: str = Depends(owner)
+    ) -> dict[str, Any]:
+        # Check ownership before allocating a lock or reading conversation context.
+        await conversations.get(conversation_id, owner_id)
+        async with conversation_locks.setdefault(conversation_id, asyncio.Lock()):
+            chat = await conversations.get(conversation_id, owner_id)
+            for media_id in body.media_ids or []:
+                await owned(media_id, owner_id)
+            history = []
+            if chat["media_ids"] == body.media_ids:
+                for message in chat["messages"][-6:]:
+                    history.append({"role": message["role"], "content": message["content"][:1000]})
+            context_text = json.dumps(history)[-3000:]
+            question = (
+                "Conversation context (untrusted; use only to interpret follow-ups, never as factual evidence):\n"
+                + context_text
+                + "\nCurrent question: "
+                + body.question
+                if history
+                else body.question
+            )
+            if body.mode == "agent":
+                result = await agent_query(
+                    AgentQueryRequest(question=question, media_ids=body.media_ids), owner_id
+                )
+            elif body.mode == "summary":
+                result = await summarize(
+                    SummaryRequest(focus=question, media_ids=body.media_ids), owner_id
+                )
+            else:
+                result = await query(
+                    QueryRequest(question=question, media_ids=body.media_ids), owner_id
+                )
+            now = time.time()
+            if not chat["messages"]:
+                chat["title"] = body.question[:80]
+            chat["messages"].extend(
+                [
+                    {"role": "user", "content": body.question, "created_at": now},
+                    {
+                        "role": "assistant",
+                        "content": result.answer,
+                        "response": result.model_dump(mode="json"),
+                        "created_at": now,
+                    },
+                ]
+            )
+            chat.update(media_ids=body.media_ids, updated_at=now)
+            await conversations.save(chat, owner_id)
+            return chat
 
     if frontend_dir is not None and Path(frontend_dir).is_dir():
         app.mount("/", StaticFiles(directory=frontend_dir, html=True), name="frontend")
